@@ -1,0 +1,31 @@
+name: Continuous Delivery
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release-and-deploy:
+    name: Build & Push Release Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract Tag Version
+        id: vars
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Production Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.backend
+          push: false
+          tags: |
+            ghcr.io/${{ github.repository }}/backend:${{ steps.vars.outputs.tag }}
+            ghcr.io/${{ github.repository }}/backend:latest
+

@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hms-backend
+  namespace: hms-platform
+  labels:
+    app: hms-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hms-backend
+  template:
+    metadata:
+      labels:
+        app: hms-backend
+    spec:
+      containers:
+        - name: backend
+          image: hms-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: APP_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: hms-config
+                  key: APP_NAME
+            - name: ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: hms-config
+                  key: ENVIRONMENT
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: hms-config
+                  key: CORS_ORIGINS
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hms-secrets
+                  key: SECRET_KEY
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hms-secrets
+                  key: ENCRYPTION_KEY
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://hms_user:$(DATABASE_PASSWORD)@postgres:5432/hms_db"
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hms-secrets
+                  key: DATABASE_PASSWORD
+            - name: REDIS_URL
+              value: "redis://:$(REDIS_PASSWORD)@redis:6379/0"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hms-secrets
+                  key: REDIS_PASSWORD
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
