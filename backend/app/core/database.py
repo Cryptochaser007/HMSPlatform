@@ -92,10 +92,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def check_db_health() -> dict:
     """Run a lightweight query to verify database connectivity."""
+    db_host = engine.url.host or "unknown"
     try:
         async with async_session_factory() as session:
             result = await session.execute(text("SELECT 1"))
             result.scalar_one()
-        return {"status": "healthy", "database": "connected"}
+        return {"status": "healthy", "database": "connected", "database_host": db_host}
     except Exception as exc:
-        return {"status": "unhealthy", "database": str(exc)}
+        return {"status": "unhealthy", "database": str(exc), "database_host": db_host}

@@ -95,6 +95,7 @@ async def health_check() -> Dict[str, str]:
         "status": db_health["status"],
         "version": settings.VERSION,
         "database": db_health["database"],
+        "database_host": db_health.get("database_host", "unknown"),
         "environment": settings.ENVIRONMENT,
     }
 

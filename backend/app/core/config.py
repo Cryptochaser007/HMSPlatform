@@ -4,6 +4,7 @@ Loads values from environment variables and .env file.
 """
 
 import json
+import os
 from functools import lru_cache
 from typing import Any, List, Union
 
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=True,
+        case_sensitive=False,
         extra="ignore",
     )
 
@@ -34,6 +35,11 @@ class Settings(BaseSettings):
     @classmethod
     def assemble_db_connection(cls, v: Any) -> str:
         """Ensure DATABASE_URL uses the asyncpg driver prefix."""
+        # Fallback to standard cloud Postgres environment variables if default was used
+        if not v or v == "postgresql+asyncpg://hms:hms_secret@localhost:5432/hms_db":
+            fallback = os.environ.get("POSTGRES_URL") or os.environ.get("POSTGRES_PRISMA_URL") or os.environ.get("POSTGRES_URL_NON_POOLING")
+            if fallback:
+                v = fallback
         if isinstance(v, str):
             if v.startswith("postgres://"):
                 return v.replace("postgres://", "postgresql+asyncpg://", 1)
