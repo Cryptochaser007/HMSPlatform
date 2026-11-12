@@ -8,10 +8,7 @@ import {
   ExternalLink,
   Activity,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-
 export const Sidebar: React.FC = () => {
-  const { user } = useAuth();
 
   const navItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },

@@ -9,8 +9,6 @@ import {
   CheckCircle2,
   X,
   Phone,
-  Calendar,
-  MapPin,
   AlertCircle,
 } from 'lucide-react';
 

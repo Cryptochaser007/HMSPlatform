@@ -11,7 +11,6 @@ import {
   AlertCircle,
   Plus,
   Trash2,
-  Clock,
   ArrowLeft,
 } from 'lucide-react';
 
@@ -176,22 +175,26 @@ export const DoctorEMR: React.FC = () => {
         {/* Encounter Selector */}
         <div className="flex items-center gap-2">
           <label className="text-xs font-semibold text-slate-600 shrink-0">Consulting Patient:</label>
-          <select
-            value={selectedEncounterId}
-            onChange={(e) => {
-              setSelectedEncounterId(e.target.value);
-              setSuccess(false);
-            }}
-            className="text-sm font-semibold bg-white border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-brand-500 focus:outline-none"
-          >
-            {encounters.map((enc) => (
-              <option key={enc.id} value={enc.id}>
-                Token #{enc.token_number || '—'} •{' '}
-                {enc.patient ? `${enc.patient.first_name} ${enc.patient.last_name}` : 'Patient'}{' '}
-                ({enc.status})
-              </option>
-            ))}
-          </select>
+          {loading ? (
+            <span className="text-xs text-slate-400">Loading queue...</span>
+          ) : (
+            <select
+              value={selectedEncounterId}
+              onChange={(e) => {
+                setSelectedEncounterId(e.target.value);
+                setSuccess(false);
+              }}
+              className="text-sm font-semibold bg-white border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-brand-500 focus:outline-none"
+            >
+              {encounters.map((enc) => (
+                <option key={enc.id} value={enc.id}>
+                  Token #{enc.token_number || '—'} •{' '}
+                  {enc.patient ? `${enc.patient.first_name} ${enc.patient.last_name}` : 'Patient'}{' '}
+                  ({enc.status})
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 

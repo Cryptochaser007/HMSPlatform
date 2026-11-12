@@ -6,7 +6,6 @@ import {
   Users,
   Clock,
   Stethoscope,
-  Activity,
   ArrowRight,
   ShieldCheck,
   Award,
