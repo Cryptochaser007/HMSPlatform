@@ -44,8 +44,8 @@ async def generate_bill(
         user_id=current_user["user_id"],
         action=AuditAction.CREATE,
         entity_type="Bill",
-        entity_id=str(bill.id),
-        new_value={"bill_number": bill.bill_number, "total": float(bill.total_amount)},
+        entity_id=bill.id,
+        new_value={"bill_number": bill.bill_number, "total": float(str(bill.total_amount))},
     )
     return BillResponse.model_validate(bill)
 
@@ -112,8 +112,8 @@ async def record_payment(
         user_id=current_user["user_id"],
         action=AuditAction.CREATE,
         entity_type="Payment",
-        entity_id=str(payment.id),
-        new_value={"receipt": payment.receipt_number, "amount": float(payment.amount)},
+        entity_id=payment.id,
+        new_value={"receipt": payment.receipt_number, "amount": float(str(payment.amount))},
     )
     return PaymentResponse.model_validate(payment)
 
