@@ -91,12 +91,31 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def check_db_health() -> dict:
-    """Run a lightweight query to verify database connectivity."""
+    """Run a lightweight query to verify database connectivity and schema readiness."""
     db_host = engine.url.host or "unknown"
     try:
         async with async_session_factory() as session:
             result = await session.execute(text("SELECT 1"))
             result.scalar_one()
-        return {"status": "healthy", "database": "connected", "database_host": db_host}
+
+            # Check if users table exists
+            table_check = await session.execute(
+                text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')")
+            )
+            has_tables = bool(table_check.scalar_one())
+
+            # Check user count if table exists
+            user_count = 0
+            if has_tables:
+                count_check = await session.execute(text("SELECT count(*) FROM users"))
+                user_count = int(count_check.scalar_one() or 0)
+
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "database_host": db_host,
+            "tables_initialized": has_tables,
+            "users_count": user_count,
+        }
     except Exception as exc:
         return {"status": "unhealthy", "database": str(exc), "database_host": db_host}

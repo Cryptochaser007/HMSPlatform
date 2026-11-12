@@ -1,11 +1,13 @@
 """FastAPI application entrypoint for ABDM-Enabled NABH HMS Platform."""
 
+import traceback
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
@@ -72,13 +74,26 @@ app.add_middleware(
 # ── Global Exception Handlers ────────────────────────────────────────────────
 
 
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Preserve standard HTTP exceptions (401, 403, 404) with their original status codes."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=getattr(exc, "headers", None),
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch unhandled runtime errors, log traceback, and return diagnostic details."""
     request_id = getattr(request.state, "request_id", "unknown")
+    print(f"🔥 [Unhandled Server Error] Request ID: {request_id}\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            "detail": "An unexpected internal server error occurred.",
+            "detail": f"Internal server error: {str(exc)}",
+            "error_type": exc.__class__.__name__,
             "request_id": request_id,
         },
     )
@@ -88,14 +103,16 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 
 @app.get("/health", tags=["System Diagnostics"])
-async def health_check() -> Dict[str, str]:
-    """Perform health checks on database and core services."""
+async def health_check() -> Dict[str, Any]:
+    """Perform health checks on database and schema readiness."""
     db_health = await check_db_health()
     return {
         "status": db_health["status"],
         "version": settings.VERSION,
         "database": db_health["database"],
         "database_host": db_health.get("database_host", "unknown"),
+        "tables_initialized": db_health.get("tables_initialized", False),
+        "users_count": db_health.get("users_count", 0),
         "environment": settings.ENVIRONMENT,
     }
 
