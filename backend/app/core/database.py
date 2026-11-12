@@ -22,12 +22,19 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+# Supabase / PgBouncer compatibility: disable prepared statement caching
+# to prevent DuplicatePreparedStatementError in transaction pooling mode
+connect_args = {
+    "statement_cache_size": 0,
+}
+
 if os.environ.get("VERCEL") == "1":
-    # Serverless runtime: avoid exhausting connection pools
+    # Serverless runtime: avoid exhausting connection pools and handle PgBouncer
     engine = create_async_engine(
         settings.DATABASE_URL,
         echo=settings.DEBUG,
         poolclass=NullPool,
+        connect_args=connect_args,
     )
 else:
     engine = create_async_engine(
@@ -37,6 +44,7 @@ else:
         max_overflow=10,
         pool_pre_ping=True,
         pool_recycle=300,
+        connect_args=connect_args,
     )
 
 async_session_factory = async_sessionmaker(
