@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS users (
     registration_number VARCHAR(100),
     phone VARCHAR(20),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
     last_login TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
