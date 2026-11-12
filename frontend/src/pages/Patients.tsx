@@ -425,3 +425,4 @@ export const Patients: React.FC = () => {
     </div>
   );
 };
+

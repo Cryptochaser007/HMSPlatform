@@ -522,3 +522,4 @@ export const DoctorEMR: React.FC = () => {
     </div>
   );
 };
+
