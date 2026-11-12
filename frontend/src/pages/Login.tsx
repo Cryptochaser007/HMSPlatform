@@ -20,10 +20,17 @@ export const Login: React.FC = () => {
       await login(email, password);
       navigate('/');
     } catch (err: any) {
-      console.error(err);
-      setError(
-        err.response?.data?.detail || 'Authentication failed. Please verify credentials.'
-      );
+      console.error('Login error details:', err);
+      const serverDetail = err.response?.data?.detail;
+      if (serverDetail) {
+        setError(serverDetail);
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        setError(
+          'Cannot connect to backend API server (port 8000 or proxy target is unreachable). Check if backend is running or set VITE_BACKEND_URL in frontend/.env.local'
+        );
+      } else {
+        setError(`Request failed with status ${err.response.status}: ${err.message || 'Unknown error'}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -136,3 +143,4 @@ export const Login: React.FC = () => {
     </div>
   );
 };
+
