@@ -1,9 +1,22 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut, User as UserIcon, ShieldCheck } from 'lucide-react';
+import { UserRole } from '../../types';
+import { LogOut, User as UserIcon, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 
 export const Header: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, switchRoleDemo } = useAuth();
+
+  const roles: { value: UserRole; label: string }[] = [
+    { value: 'SUPER_ADMIN', label: 'Super Admin' },
+    { value: 'HOSPITAL_ADMIN', label: 'Hospital Admin' },
+    { value: 'DOCTOR', label: 'Doctor (Consultant)' },
+    { value: 'NURSE', label: 'Nurse' },
+    { value: 'FRONT_DESK', label: 'Front Desk' },
+    { value: 'PHARMACIST', label: 'Pharmacist' },
+    { value: 'LAB_TECHNICIAN', label: 'Lab Technician' },
+    { value: 'RADIOLOGIST', label: 'Radiologist' },
+    { value: 'BILLING_CLERK', label: 'Billing Clerk' },
+  ];
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between sticky top-0 z-30 shadow-sm">
@@ -23,16 +36,35 @@ export const Header: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
+        {/* Quick Role Simulator Switcher for Demo */}
         {user && (
-          <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
+          <div className="hidden md:flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-xs">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-brand-600" />
+            <span className="font-semibold text-slate-600">Simulate Role:</span>
+            <select
+              value={user.role}
+              onChange={(e) => switchRoleDemo(e.target.value as UserRole)}
+              className="bg-transparent font-bold text-brand-700 focus:outline-none cursor-pointer"
+            >
+              {roles.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {user && (
+          <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
             <div className="w-9 h-9 bg-brand-50 border border-brand-200 rounded-full flex items-center justify-center text-brand-700">
               <UserIcon className="w-5 h-5" />
             </div>
             <div className="text-right hidden sm:block">
               <div className="text-sm font-semibold text-slate-800">{user.full_name}</div>
               <div className="text-xs text-slate-500 font-medium">
-                <span className="inline-block px-1.5 py-0.2 bg-slate-100 rounded text-slate-700 font-mono text-[10px] mr-1">
+                <span className="inline-block px-1.5 py-0.2 bg-slate-100 rounded text-slate-700 font-mono text-[10px] mr-1 font-semibold">
                   {user.role}
                 </span>
                 {user.department && `• ${user.department}`}
@@ -51,4 +83,3 @@ export const Header: React.FC = () => {
     </header>
   );
 };
-

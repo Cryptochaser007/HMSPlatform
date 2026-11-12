@@ -1,5 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard,
   Users,
@@ -7,39 +8,112 @@ import {
   Stethoscope,
   ExternalLink,
   Activity,
+  CreditCard,
+  Sliders,
+  Lock,
 } from 'lucide-react';
+
 export const Sidebar: React.FC = () => {
+  const { user } = useAuth();
 
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Patients (UHID / ABHA)', path: '/patients', icon: Users },
-    { name: 'OPD Queue', path: '/queue', icon: Clock },
-    { name: 'Doctor Consultation (EMR)', path: '/emr', icon: Stethoscope },
+    {
+      name: 'Dashboard',
+      path: '/',
+      icon: LayoutDashboard,
+      allowedRoles: [
+        'SUPER_ADMIN',
+        'HOSPITAL_ADMIN',
+        'DOCTOR',
+        'NURSE',
+        'PHARMACIST',
+        'LAB_TECHNICIAN',
+        'RADIOLOGIST',
+        'BILLING_CLERK',
+        'FRONT_DESK',
+      ],
+    },
+    {
+      name: 'ABHA Care Portal',
+      path: '/abha',
+      icon: CreditCard,
+      allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR', 'FRONT_DESK', 'NURSE'],
+    },
+    {
+      name: 'Patients (UHID / ABHA)',
+      path: '/patients',
+      icon: Users,
+      allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR', 'FRONT_DESK', 'NURSE', 'BILLING_CLERK'],
+    },
+    {
+      name: 'OPD Queue',
+      path: '/queue',
+      icon: Clock,
+      allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR', 'FRONT_DESK', 'NURSE'],
+    },
+    {
+      name: 'Doctor Consultation (EMR)',
+      path: '/emr',
+      icon: Stethoscope,
+      allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR'],
+    },
+    {
+      name: 'RBAC Permission Matrix',
+      path: '/rbac',
+      icon: Sliders,
+      allowedRoles: [
+        'SUPER_ADMIN',
+        'HOSPITAL_ADMIN',
+        'DOCTOR',
+        'NURSE',
+        'PHARMACIST',
+        'LAB_TECHNICIAN',
+        'RADIOLOGIST',
+        'BILLING_CLERK',
+        'FRONT_DESK',
+      ],
+    },
   ];
+
+  const currentRole = user?.role || 'DOCTOR';
 
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 min-h-[calc(100vh-4rem)] border-r border-slate-800">
       <div className="p-4 space-y-1">
-        <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
-          Clinical Navigation
+        <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2 flex items-center justify-between">
+          <span>Clinical Navigation</span>
+          <span className="text-[10px] text-brand-400 font-mono">{currentRole}</span>
         </div>
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            end={item.path === '/'}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-brand-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`
-            }
-          >
-            <item.icon className="w-4 h-4 shrink-0" />
-            {item.name}
-          </NavLink>
-        ))}
+        {navItems.map((item) => {
+          const isAllowed = item.allowedRoles.includes(currentRole);
+
+          return (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              end={item.path === '/'}
+              className={({ isActive }) =>
+                `flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : isAllowed
+                    ? 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    : 'text-slate-600 hover:text-slate-400 hover:bg-slate-800/30'
+                }`
+              }
+            >
+              <div className="flex items-center gap-3">
+                <item.icon className="w-4 h-4 shrink-0" />
+                <span className={!isAllowed ? 'line-through opacity-70' : ''}>{item.name}</span>
+              </div>
+              {!isAllowed && (
+                <span title="Restricted for this role under DPDP">
+                  <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                </span>
+              )}
+            </NavLink>
+          );
+        })}
       </div>
 
       <div className="mt-auto p-4 border-t border-slate-800 space-y-3">
@@ -69,4 +143,3 @@ export const Sidebar: React.FC = () => {
     </aside>
   );
 };
-

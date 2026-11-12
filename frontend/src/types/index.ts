@@ -112,3 +112,35 @@ export interface Prescription {
   notes?: string;
 }
 
+export interface AbhaProfile {
+  health_id: string;
+  health_id_number: string;
+  name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
+  gender: string;
+  year_of_birth: number;
+  month_of_birth?: number;
+  day_of_birth?: number;
+  mobile?: string;
+  email?: string;
+  address?: string;
+  district?: string;
+  state?: string;
+  pincode?: string;
+  kycVerified?: boolean;
+  profile_photo?: string;
+}
+
+export interface SignupData {
+  email: string;
+  password: string;
+  full_name: string;
+  role: UserRole;
+  department?: string;
+  registration_number?: string;
+  phone?: string;
+}
+
+

@@ -73,6 +73,38 @@ async def logout(
 
 
 @router.post(
+    "/signup",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def signup(
+    data: UserCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Public sign-up endpoint for new hospital staff accounts."""
+    if data.role.upper() == Role.SUPER_ADMIN.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot self-register as Super Administrator",
+        )
+    user = await auth_service.register_user(db, data)
+
+    logger = await get_audit_logger()
+    await logger.log(
+        db,
+        user_id=str(user.id),
+        action=AuditAction.CREATE,
+        entity_type="User",
+        entity_id=str(user.id),
+        new_value={"email": user.email, "role": user.role, "registration_type": "public_signup"},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return UserResponse.model_validate(user)
+
+
+@router.post(
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,

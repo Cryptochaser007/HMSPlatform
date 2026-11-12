@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User } from '../types';
+import { User, UserRole } from '../types';
 import { authApi } from '../services/api';
 
 interface AuthContextType {
@@ -7,6 +7,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  switchRoleDemo: (role: UserRole) => void;
   isAuthenticated: boolean;
 }
 
@@ -50,6 +51,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.location.href = '/login';
   };
 
+  const switchRoleDemo = (role: UserRole) => {
+    if (user) {
+      setUser({ ...user, role });
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -57,6 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         login,
         logout,
+        switchRoleDemo,
         isAuthenticated: !!user,
       }}
     >

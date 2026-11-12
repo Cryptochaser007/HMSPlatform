@@ -6,6 +6,8 @@ import {
   Encounter,
   ClinicalNote,
   Prescription,
+  AbhaProfile,
+  SignupData,
 } from '../types';
 
 // In production, Vite routes /api/v1 through Vercel rewrites to backend directly.
@@ -42,6 +44,10 @@ api.interceptors.response.use(
 export const authApi = {
   login: async (email: string, password: string): Promise<AuthTokens> => {
     const res = await api.post<AuthTokens>('/auth/login', { email, password });
+    return res.data;
+  },
+  signup: async (data: SignupData): Promise<User> => {
+    const res = await api.post<User>('/auth/signup', data);
     return res.data;
   },
   getMe: async (): Promise<User> => {
@@ -98,6 +104,21 @@ export const clinicalApi = {
   },
   createPrescription: async (prescription: Prescription): Promise<Prescription> => {
     const res = await api.post<Prescription>('/clinical/prescriptions', prescription);
+    return res.data;
+  },
+};
+
+export const abdmApi = {
+  generateAadhaarOtp: async (aadhaar_number: string): Promise<{ txnId?: string; txn_id?: string; message?: string; mobileNumber?: string }> => {
+    const res = await api.post('/abdm/abha/aadhaar/otp', { aadhaar_number });
+    return res.data;
+  },
+  verifyAadhaarOtp: async (txn_id: string, otp: string): Promise<any> => {
+    const res = await api.post('/abdm/abha/aadhaar/verify', { txn_id, otp });
+    return res.data;
+  },
+  getAbhaProfile: async (abhaId: string): Promise<AbhaProfile> => {
+    const res = await api.get<AbhaProfile>(`/abdm/abha/${encodeURIComponent(abhaId)}/profile`);
     return res.data;
   },
 };
