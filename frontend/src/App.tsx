@@ -9,6 +9,7 @@ import { Queue } from './pages/Queue';
 import { DoctorEMR } from './pages/DoctorEMR';
 import { AbhaPortal } from './pages/AbhaPortal';
 import { RBACMatrix } from './pages/RBACMatrix';
+import { WardOccupancy } from './pages/WardOccupancy';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -48,6 +49,7 @@ export const App: React.FC = () => {
             <Route path="patients" element={<Patients />} />
             <Route path="queue" element={<Queue />} />
             <Route path="emr" element={<DoctorEMR />} />
+            <Route path="wards" element={<WardOccupancy />} />
             <Route path="rbac" element={<RBACMatrix />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

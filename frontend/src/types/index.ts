@@ -143,4 +143,37 @@ export interface SignupData {
   phone?: string;
 }
 
+export interface LabResultItem {
+  id: string;
+  parameter_name: string;
+  value: string;
+  unit: string;
+  reference_interval: string;
+  flag: 'NORMAL' | 'HIGH' | 'LOW';
+  category: string;
+}
+
+export interface BedItem {
+  id: string;
+  ward_name: string;
+  ward_type: 'ICU' | 'GENERAL' | 'DELUXE' | 'EMERGENCY';
+  bed_number: string;
+  status: 'AVAILABLE' | 'OCCUPIED' | 'MAINTENANCE' | 'RESERVED';
+  daily_charge: number;
+  patient_name?: string;
+  patient_uhid?: string;
+  attending_doctor?: string;
+  admitted_at?: string;
+}
+
+export interface WardOccupancyStats {
+  total_beds: number;
+  occupied: number;
+  available: number;
+  maintenance: number;
+  reserved: number;
+  occupancy_rate: number;
+}
+
+
 

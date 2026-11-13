@@ -10,6 +10,7 @@ import {
   Activity,
   CreditCard,
   Sliders,
+  Bed,
   Lock,
 } from 'lucide-react';
 
@@ -20,6 +21,7 @@ export const Sidebar: React.FC = () => {
     {
       name: 'Dashboard',
       path: '/',
+      shortcut: 'Alt+D',
       icon: LayoutDashboard,
       allowedRoles: [
         'SUPER_ADMIN',
@@ -36,30 +38,42 @@ export const Sidebar: React.FC = () => {
     {
       name: 'ABHA Care Portal',
       path: '/abha',
+      shortcut: 'Alt+A',
       icon: CreditCard,
       allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR', 'FRONT_DESK', 'NURSE'],
     },
     {
       name: 'Patients (UHID / ABHA)',
       path: '/patients',
+      shortcut: 'Alt+P',
       icon: Users,
       allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR', 'FRONT_DESK', 'NURSE', 'BILLING_CLERK'],
     },
     {
       name: 'OPD Queue',
       path: '/queue',
+      shortcut: 'Alt+Q',
       icon: Clock,
       allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR', 'FRONT_DESK', 'NURSE'],
     },
     {
       name: 'Doctor Consultation (EMR)',
       path: '/emr',
+      shortcut: 'Alt+E',
       icon: Stethoscope,
       allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR'],
     },
     {
+      name: 'Inpatient Beds & Wards',
+      path: '/wards',
+      shortcut: 'Alt+W',
+      icon: Bed,
+      allowedRoles: ['SUPER_ADMIN', 'HOSPITAL_ADMIN', 'DOCTOR', 'NURSE', 'FRONT_DESK'],
+    },
+    {
       name: 'RBAC Permission Matrix',
       path: '/rbac',
+      shortcut: 'Alt+R',
       icon: Sliders,
       allowedRoles: [
         'SUPER_ADMIN',
@@ -106,11 +120,16 @@ export const Sidebar: React.FC = () => {
                 <item.icon className="w-4 h-4 shrink-0" />
                 <span className={!isAllowed ? 'line-through opacity-70' : ''}>{item.name}</span>
               </div>
-              {!isAllowed && (
-                <span title="Restricted for this role under DPDP">
-                  <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-mono opacity-50 hidden group-hover:inline">
+                  {item.shortcut}
                 </span>
-              )}
+                {!isAllowed && (
+                  <span title="Restricted for this role under DPDP">
+                    <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                  </span>
+                )}
+              </div>
             </NavLink>
           );
         })}

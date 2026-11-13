@@ -8,6 +8,7 @@ import {
   Prescription,
   AbhaProfile,
   SignupData,
+  WardOccupancyStats,
 } from '../types';
 
 // In production, Vite routes /api/v1 through Vercel rewrites to backend directly.
@@ -119,6 +120,21 @@ export const abdmApi = {
   },
   getAbhaProfile: async (abhaId: string): Promise<AbhaProfile> => {
     const res = await api.get<AbhaProfile>(`/abdm/abha/${encodeURIComponent(abhaId)}/profile`);
+    return res.data;
+  },
+};
+
+export const wardsApi = {
+  getOccupancy: async (): Promise<WardOccupancyStats> => {
+    const res = await api.get('/wards/occupancy');
+    return res.data;
+  },
+  listWards: async (): Promise<any[]> => {
+    const res = await api.get('/wards/');
+    return res.data;
+  },
+  updateBedStatus: async (bedId: string, status: string): Promise<any> => {
+    const res = await api.put(`/wards/beds/${bedId}/status`, { status });
     return res.data;
   },
 };

@@ -8,9 +8,10 @@ import {
   Stethoscope,
   ArrowRight,
   ShieldCheck,
-  Award,
   CreditCard,
   Sliders,
+  Bed,
+  Command,
 } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
@@ -59,23 +60,23 @@ export const Dashboard: React.FC = () => {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => navigate('/abha')}
-            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm flex items-center gap-2"
+            className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm flex items-center gap-1.5"
           >
-            <CreditCard className="w-4 h-4" />
-            Generate ABHA ID
+            <CreditCard className="w-3.5 h-3.5" />
+            Generate ABHA
           </button>
           <button
-            onClick={() => navigate('/patients')}
-            className="px-4 py-2 bg-white text-brand-800 hover:bg-brand-50 rounded-lg text-sm font-semibold transition-colors shadow-sm flex items-center gap-2"
+            onClick={() => navigate('/wards')}
+            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm flex items-center gap-1.5"
           >
-            <Users className="w-4 h-4" />
-            Register Patient
+            <Bed className="w-3.5 h-3.5" />
+            Ward Census
           </button>
           <button
             onClick={() => navigate('/emr')}
-            className="px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm flex items-center gap-2"
+            className="px-3.5 py-2 bg-white text-brand-800 hover:bg-brand-50 rounded-lg text-xs font-semibold transition-colors shadow-sm flex items-center gap-1.5"
           >
-            <Stethoscope className="w-4 h-4" />
+            <Stethoscope className="w-3.5 h-3.5" />
             Doctor Station
           </button>
         </div>
@@ -120,6 +121,21 @@ export const Dashboard: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
           <div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              IPD Bed Census
+            </div>
+            <div className="text-2xl font-bold text-indigo-600 mt-1">75%</div>
+            <div className="text-xs text-indigo-600 font-medium mt-1 flex items-center gap-1">
+              <Bed className="w-3.5 h-3.5" /> 42 Occupied / 14 Vacant
+            </div>
+          </div>
+          <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+            <Bed className="w-6 h-6" />
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+          <div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
               ABDM Status
             </div>
             <div className="text-2xl font-bold text-emerald-600 mt-1">Active</div>
@@ -131,21 +147,20 @@ export const Dashboard: React.FC = () => {
             <ShieldCheck className="w-6 h-6" />
           </div>
         </div>
+      </div>
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-          <div>
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              NABH Compliance
-            </div>
-            <div className="text-2xl font-bold text-brand-700 mt-1">98.4%</div>
-            <div className="text-xs text-brand-600 font-medium mt-1 flex items-center gap-1">
-              <Award className="w-3.5 h-3.5" /> 5th Edition Clinical Audit
-            </div>
-          </div>
-          <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
-            <Award className="w-6 h-6" />
-          </div>
+      {/* Keyboard Shortcuts Hint Banner */}
+      <div className="p-3 bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2">
+          <Command className="w-4 h-4 text-emerald-400" />
+          <span className="font-bold">Keyboard-First Clinical Power:</span>
+          <span className="text-slate-300">
+            Press <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono text-[11px]">Ctrl+K</kbd> anywhere for Quick Commands. Use <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono text-[11px]">Alt+E</kbd> for EMR, <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono text-[11px]">Alt+W</kbd> for Wards, <kbd className="px-1.5 py-0.5 bg-white/10 rounded font-mono text-[11px]">Alt+A</kbd> for ABHA.
+          </span>
         </div>
+        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono">
+          Instant Navigation Active
+        </span>
       </div>
 
       {/* Quick Launch Cards */}
@@ -169,38 +184,20 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div
-          onClick={() => navigate('/rbac')}
+          onClick={() => navigate('/wards')}
           className="bg-white p-6 rounded-xl border border-slate-200 hover:border-indigo-500 cursor-pointer transition-all hover:shadow-md group"
         >
           <div className="w-10 h-10 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600 mb-4 group-hover:scale-110 transition-transform">
-            <Sliders className="w-5 h-5" />
+            <Bed className="w-5 h-5" />
           </div>
           <h3 className="text-base font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
-            RBAC Access Matrix
+            Inpatient Bed & Ward Map
           </h3>
           <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-            Explore 9 hospital roles, information access meters, and fine-grained permissions under DPDP Act 2023.
+            Live visual bed census for MICU, General Wards, and Emergency. Manage admissions, bed cleaning, and discharges.
           </p>
           <div className="mt-4 flex items-center text-xs font-semibold text-indigo-600 gap-1 group-hover:gap-2 transition-all">
-            Inspect RBAC Matrix <ArrowRight className="w-3.5 h-3.5" />
-          </div>
-        </div>
-
-        <div
-          onClick={() => navigate('/queue')}
-          className="bg-white p-6 rounded-xl border border-slate-200 hover:border-amber-500 cursor-pointer transition-all hover:shadow-md group"
-        >
-          <div className="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center text-amber-600 mb-4 group-hover:scale-110 transition-transform">
-            <Clock className="w-5 h-5" />
-          </div>
-          <h3 className="text-base font-bold text-slate-900 group-hover:text-amber-600 transition-colors">
-            OPD Waiting Queue & Tokens
-          </h3>
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-            Monitor real-time patient queues, assign patients to available specialists, manage token priorities, and track wait times.
-          </p>
-          <div className="mt-4 flex items-center text-xs font-semibold text-amber-600 gap-1 group-hover:gap-2 transition-all">
-            View Live Queue <ArrowRight className="w-3.5 h-3.5" />
+            View Bed Matrix <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </div>
 
@@ -212,13 +209,31 @@ export const Dashboard: React.FC = () => {
             <Stethoscope className="w-5 h-5" />
           </div>
           <h3 className="text-base font-bold text-slate-900 group-hover:text-brand-600 transition-colors">
-            Doctor Consultation Station
+            Doctor Consultation (EMR)
           </h3>
           <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-            Record vital signs, document structured SOAP clinical notes, build digital prescriptions, and digitally sign records.
+            CPOE 1-click clinical quick-sets, FHIR R4 abnormal lab reports, and SMS/WhatsApp digital prescription dispatch.
           </p>
           <div className="mt-4 flex items-center text-xs font-semibold text-brand-600 gap-1 group-hover:gap-2 transition-all">
-            Open EMR Station <ArrowRight className="w-3.5 h-3.5" />
+            Open Doctor Station <ArrowRight className="w-3.5 h-3.5" />
+          </div>
+        </div>
+
+        <div
+          onClick={() => navigate('/rbac')}
+          className="bg-white p-6 rounded-xl border border-slate-200 hover:border-slate-800 cursor-pointer transition-all hover:shadow-md group"
+        >
+          <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-700 mb-4 group-hover:scale-110 transition-transform">
+            <Sliders className="w-5 h-5" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900 group-hover:text-slate-900 transition-colors">
+            RBAC Access Matrix
+          </h3>
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+            Explore 9 hospital roles, information access meters, and fine-grained permissions under DPDP Act 2023.
+          </p>
+          <div className="mt-4 flex items-center text-xs font-semibold text-slate-700 gap-1 group-hover:gap-2 transition-all">
+            Inspect RBAC Matrix <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </div>
       </div>
