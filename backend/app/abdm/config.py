@@ -1,98 +1,119 @@
 """
-ABDM-specific configuration and settings.
+ABDM v3 & v0.5 Environment-Driven Configuration and Endpoint Registry.
 
-Manages all ABDM Gateway URLs, service endpoints, OAuth configuration,
-callback URLs, and FHIR resource type mappings for the integration layer.
+Controls execution mode strictly via ``ABDM_ENV`` (MOCK | SANDBOX | PRODUCTION)
+and binds all NHA gateway, ABHA v3, X-CM-ID, bridge, and HFR facility settings
+exclusively from environment variables (zero hardcoded credentials).
 """
 
+from __future__ import annotations
+
+import os
 from enum import Enum
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class ABDMEnvironment(str, Enum):
-    """ABDM environment selector."""
+class ABDMMode(str, Enum):
+    """Execution strategy for the ABDM Strategy/Adapter layer."""
 
-    SANDBOX = "sandbox"
-    PRODUCTION = "production"
+    MOCK = "MOCK"
+    SANDBOX = "SANDBOX"
+    PRODUCTION = "PRODUCTION"
+
+
+# Backward-compatible alias
+ABDMEnvironment = ABDMMode
 
 
 # ---------------------------------------------------------------------------
-# Gateway base URLs
+# Default base URLs by environment (overridable via ABDM_GATEWAY_URL / ABDM_ABHA_URL)
 # ---------------------------------------------------------------------------
-ABDM_GATEWAY_URLS: dict[ABDMEnvironment, str] = {
-    ABDMEnvironment.SANDBOX: "https://dev.abdm.gov.in/gateway",
-    ABDMEnvironment.PRODUCTION: "https://live.abdm.gov.in/gateway",
+ABDM_GATEWAY_URLS: dict[ABDMMode, str] = {
+    ABDMMode.MOCK: "https://dev.abdm.gov.in",
+    ABDMMode.SANDBOX: "https://dev.abdm.gov.in",
+    ABDMMode.PRODUCTION: "https://apis.abdm.gov.in",
+}
+
+ABDM_ABHA_URLS: dict[ABDMMode, str] = {
+    ABDMMode.MOCK: "https://abhasbx.abdm.gov.in/abha/api/v3",
+    ABDMMode.SANDBOX: "https://abhasbx.abdm.gov.in/abha/api/v3",
+    ABDMMode.PRODUCTION: "https://abha.abdm.gov.in/abha/api/v3",
+}
+
+ABDM_TOKEN_PATHS: dict[ABDMMode, str] = {
+    ABDMMode.MOCK: "/gateway/v0.5/sessions",
+    ABDMMode.SANDBOX: "/gateway/v0.5/sessions",
+    ABDMMode.PRODUCTION: "/gateway/v0.5/sessions",
 }
 
 # ---------------------------------------------------------------------------
-# Service endpoint paths (appended to the gateway base URL)
+# Service endpoint paths (ABDM v3 ABHA + v0.5/v3 HIE-CM Gateway)
 # ---------------------------------------------------------------------------
-ABDM_ENDPOINTS = {
-    # ABHA creation (Aadhaar flow)
-    "abha_aadhaar_generate_otp": "/v1/registration/aadhaar/generateOtp",
-    "abha_aadhaar_verify_otp": "/v1/registration/aadhaar/verifyOtp",
-    "abha_aadhaar_create": "/v1/registration/aadhaar/createHealthIdWithPreVerified",
-    # ABHA creation (Mobile flow)
-    "abha_mobile_generate_otp": "/v1/registration/mobile/generateOtp",
-    "abha_mobile_verify_otp": "/v1/registration/mobile/verifyOtp",
-    "abha_mobile_create": "/v1/registration/mobile/createHealthId",
-    # ABHA profile
-    "abha_profile": "/v1/account/profile",
-    "abha_search": "/v1/search/searchByHealthId",
-    # Health Professional Registry
-    "hpr_verify": "/v1/doctors/verify",
-    "hpr_search": "/v1/doctors/search",
-    # Health Facility Registry
-    "hfr_register": "/v1/facility/register",
-    "hfr_profile": "/v1/facility/{facility_id}",
-    "hfr_update": "/v1/facility/{facility_id}",
-    # Consent Manager
-    "consent_request_init": "/v0.5/consent-requests/init",
-    "consent_fetch": "/v0.5/consent-requests/{consent_id}",
-    # Health Information Exchange
-    "hi_request": "/v0.5/health-information/cm/request",
-    "hi_transfer": "/v0.5/health-information/transfer",
-    # Patient discovery & linking (HIP → Gateway)
-    "on_discover": "/v0.5/care-contexts/on-discover",
-    "on_link_init": "/v0.5/links/link/on-init",
-    "on_link_confirm": "/v0.5/links/link/on-confirm",
-    "on_notify": "/v0.5/consent-requests/on-notify",
+ABDM_ENDPOINTS: dict[str, str] = {
+    # Sessions (OAuth 2.0)
+    "sessions_v05": "/gateway/v0.5/sessions",
+    "sessions_v3": "/api/hiecm/gateway/v3/sessions",
+    # M1: ABHA v3 Creation & Verification (relative to ABDM_ABHA_URL)
+    "abha_aadhaar_generate_otp": "/enrollment/request/otp",
+    "abha_aadhaar_verify_otp": "/enrollment/enrol/byAadhaar",
+    "abha_aadhaar_create": "/enrollment/enrol/byAadhaar",
+    "abha_mobile_generate_otp": "/profile/login/request/otp",
+    "abha_mobile_verify_otp": "/profile/login/verify",
+    "abha_mobile_create": "/enrollment/enrol/byMobile",
+    "abha_address_search": "/phr/web/login/abha/search",
+    "abha_profile": "/profile/account",
+    "abha_search": "/phr/web/login/abha/search",
+    # M1: Scan & Share (HIP Counter Check-in)
+    "patient_share_on_share": "/gateway/v3/hip/patient-share/on-share",
+    # HPR / HFR
+    "hpr_verify": "/gateway/v1/doctors/verify",
+    "hpr_search": "/gateway/v1/doctors/search",
+    "hfr_register": "/gateway/v1/facility/register",
+    "hfr_profile": "/gateway/v1/facility/{facility_id}",
+    "hfr_update": "/gateway/v1/facility/{facility_id}",
+    # M2: HIP Discovery & Linking (HIP -> Gateway)
+    "on_discover": "/gateway/v0.5/care-contexts/on-discover",
+    "on_link_init": "/gateway/v0.5/links/link/on-init",
+    "on_link_confirm": "/gateway/v0.5/links/link/on-confirm",
+    "hip_link_add_contexts": "/gateway/v0.5/links/context/add",
+    "hip_consent_on_notify": "/gateway/v0.5/consents/hip/on-notify",
+    "hip_hi_on_request": "/gateway/v0.5/health-information/hip/on-request",
+    "hi_notify": "/gateway/v0.5/health-information/notify",
+    # M3: HIU Consent Manager & Health Information Exchange
+    "consent_request_init": "/gateway/v0.5/consent-requests/init",
+    "consent_fetch": "/gateway/v0.5/consent-requests/{consent_id}",
+    "hi_request": "/gateway/v0.5/health-information/cm/request",
+    "hi_transfer": "/gateway/v0.5/health-information/transfer",
+    "on_notify": "/gateway/v0.5/consents/hip/on-notify",
 }
 
 # ---------------------------------------------------------------------------
-# OAuth / token endpoint
-# ---------------------------------------------------------------------------
-ABDM_TOKEN_ENDPOINTS: dict[ABDMEnvironment, str] = {
-    ABDMEnvironment.SANDBOX: "https://dev.abdm.gov.in/gateway/v0.5/sessions",
-    ABDMEnvironment.PRODUCTION: "https://live.abdm.gov.in/gateway/v0.5/sessions",
-}
-
-# ---------------------------------------------------------------------------
-# FHIR resource type → ABDM profile URL mapping
+# FHIR R4 NRCeS Profiles
 # ---------------------------------------------------------------------------
 FHIR_RESOURCE_PROFILES: dict[str, str] = {
     "Patient": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Patient",
+    "Practitioner": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Practitioner",
+    "Organization": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization",
     "Encounter": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Encounter",
     "Condition": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Condition",
     "Observation": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Observation",
     "MedicationRequest": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/MedicationRequest",
-    "DiagnosticReport": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DiagnosticReport",
+    "DiagnosticReport": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DiagnosticReportLab",
     "DocumentReference": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentReference",
-    "Composition": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Composition",
-    "Bundle": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Bundle",
+    "OPConsultRecord": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/OPConsultRecord",
+    "PrescriptionRecord": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/PrescriptionRecord",
+    "DiagnosticReportRecord": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DiagnosticReportRecord",
+    "DischargeSummaryRecord": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DischargeSummaryRecord",
+    "DocumentBundle": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentBundle",
     "AllergyIntolerance": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/AllergyIntolerance",
     "Procedure": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Procedure",
-    "Immunization": "https://nrces.in/ndhm/fhir/r4/StructureDefinition/Immunization",
 }
 
-# ---------------------------------------------------------------------------
-# ABDM Health Information Types
-# ---------------------------------------------------------------------------
-HEALTH_INFO_TYPES = [
+HEALTH_INFO_TYPES: list[str] = [
     "OPConsultation",
     "Prescription",
     "DischargeSummary",
@@ -102,10 +123,7 @@ HEALTH_INFO_TYPES = [
     "WellnessRecord",
 ]
 
-# ---------------------------------------------------------------------------
-# Coding system URIs
-# ---------------------------------------------------------------------------
-CODING_SYSTEMS = {
+CODING_SYSTEMS: dict[str, str] = {
     "snomed": "http://snomed.info/sct",
     "loinc": "http://loinc.org",
     "icd10": "http://hl7.org/fhir/sid/icd-10",
@@ -116,108 +134,150 @@ CODING_SYSTEMS = {
 
 
 class ABDMSettings(BaseSettings):
-    """
-    ABDM integration settings, loaded from environment variables.
+    """Environment-driven ABDM v3 configuration (no hardcoded credentials)."""
 
-    Environment variables:
-        ABDM_ENVIRONMENT    – "sandbox" or "production" (default: sandbox)
-        ABDM_CLIENT_ID      – OAuth2 client ID issued by ABDM
-        ABDM_CLIENT_SECRET  – OAuth2 client secret
-        ABDM_HIP_ID         – Registered HIP ID with ABDM
-        ABDM_HIU_ID         – Registered HIU ID with ABDM
-        ABDM_CALLBACK_BASE  – Base URL for ABDM gateway callbacks
-        ABDM_REQUEST_TIMEOUT – HTTP request timeout in seconds (default: 30)
-        ABDM_ENCRYPTION_KEY  – RSA public key for data encryption (optional)
-    """
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
 
-    model_config = {"env_prefix": "ABDM_"}
-
-    environment: ABDMEnvironment = Field(
-        default=ABDMEnvironment.SANDBOX,
-        description="ABDM environment: sandbox or production",
+    abdm_env: ABDMMode = Field(
+        default=ABDMMode.MOCK,
+        description="ABDM execution mode: MOCK | SANDBOX | PRODUCTION",
     )
-    client_id: str = Field(
-        default="",
-        description="OAuth2 client ID issued by ABDM",
-    )
-    client_secret: str = Field(
-        default="",
-        description="OAuth2 client secret issued by ABDM",
-    )
-    hip_id: str = Field(
-        default="",
-        description="Registered Health Information Provider ID",
-    )
-    hiu_id: str = Field(
-        default="",
-        description="Registered Health Information User ID",
-    )
-    callback_base_url: str = Field(
-        default="http://localhost:8000",
-        description="Base URL for ABDM gateway callbacks",
-    )
-    request_timeout: int = Field(
-        default=30,
-        description="HTTP request timeout in seconds",
-    )
-    encryption_key: Optional[str] = Field(
+    abdm_gateway_url: Optional[str] = Field(
         default=None,
-        description="RSA public key (PEM) for ABDM data encryption",
+        description="NHA Gateway base URL (e.g. https://dev.abdm.gov.in)",
     )
+    abdm_abha_url: Optional[str] = Field(
+        default=None,
+        description="ABHA v3 API base URL (e.g. https://abhasbx.abdm.gov.in/abha/api/v3)",
+    )
+    abdm_x_cm_id: str = Field(
+        default="sbx",
+        description="Consent Manager ID header X-CM-ID (sbx for Sandbox, abdm for Production)",
+    )
+    abdm_client_id: str = Field(default="", description="NHA OAuth2 Client ID")
+    abdm_client_secret: str = Field(default="", description="NHA OAuth2 Client Secret")
+    abdm_bridge_id: str = Field(default="", description="Registered ABDM Bridge ID")
+    hfr_facility_id: str = Field(
+        default="",
+        description="Health Facility Registry (HFR) Facility ID",
+    )
+    abdm_hip_id: str = Field(default="", description="Registered HIP ID (defaults to HFR_FACILITY_ID)")
+    abdm_hiu_id: str = Field(default="", description="Registered HIU ID (defaults to HFR_FACILITY_ID)")
+    abdm_callback_base_url: str = Field(
+        default="http://localhost:8000",
+        description="Public HTTPS callback base URL registered with NHA Bridge",
+    )
+    abdm_webhook_secret: str = Field(
+        default="",
+        description="Shared secret / key for verifying NHA webhook signatures",
+    )
+    abdm_request_timeout: int = Field(default=30, ge=5, le=120)
 
-    # -- derived properties ---------------------------------------------------
+    @field_validator("abdm_env", mode="before")
+    @classmethod
+    def normalize_env(cls, v: object) -> str:
+        if isinstance(v, ABDMMode):
+            return v.value
+        raw = str(v or os.environ.get("ABDM_ENV", "MOCK")).strip().upper()
+        if raw in ("MOCK", "SANDBOX", "PRODUCTION"):
+            return raw
+        return "MOCK"
+
+    # -- Convenience properties (preserving backward compatibility) -----------
+
+    @property
+    def environment(self) -> ABDMMode:
+        return self.abdm_env
+
+    @property
+    def client_id(self) -> str:
+        return self.abdm_client_id
+
+    @property
+    def client_secret(self) -> str:
+        return self.abdm_client_secret
+
+    @property
+    def x_cm_id(self) -> str:
+        return self.abdm_x_cm_id or ("abdm" if self.abdm_env == ABDMMode.PRODUCTION else "sbx")
+
+    @property
+    def bridge_id(self) -> str:
+        return self.abdm_bridge_id
+
+    @property
+    def hip_id(self) -> str:
+        return self.abdm_hip_id or self.hfr_facility_id or "HMS_HIP_SANDBOX"
+
+    @property
+    def hiu_id(self) -> str:
+        return self.abdm_hiu_id or self.hfr_facility_id or "HMS_HIU_SANDBOX"
+
+    @property
+    def callback_base_url(self) -> str:
+        return self.abdm_callback_base_url.rstrip("/")
+
+    @property
+    def request_timeout(self) -> int:
+        return self.abdm_request_timeout
 
     @property
     def gateway_url(self) -> str:
-        """Return the ABDM gateway base URL for the configured environment."""
-        return ABDM_GATEWAY_URLS[self.environment]
+        return (self.abdm_gateway_url or ABDM_GATEWAY_URLS[self.abdm_env]).rstrip("/")
+
+    @property
+    def abha_url(self) -> str:
+        return (self.abdm_abha_url or ABDM_ABHA_URLS[self.abdm_env]).rstrip("/")
 
     @property
     def token_url(self) -> str:
-        """Return the OAuth2 token endpoint for the configured environment."""
-        return ABDM_TOKEN_ENDPOINTS[self.environment]
+        return f"{self.gateway_url}{ABDM_TOKEN_PATHS[self.abdm_env]}"
 
     @property
     def callback_urls(self) -> dict[str, str]:
-        """Return fully-qualified callback URLs for ABDM gateway registration."""
-        base = self.callback_base_url.rstrip("/")
+        base = self.callback_base_url
         return {
-            "on_discover": f"{base}/abdm/v0.5/patients/on-discover",
-            "on_link_init": f"{base}/abdm/v0.5/links/link/on-init",
-            "on_link_confirm": f"{base}/abdm/v0.5/links/link/on-confirm",
-            "on_consent_notify": f"{base}/abdm/v0.5/consent-requests/on-notify",
-            "on_data_request": f"{base}/abdm/v0.5/health-information/request",
-            "on_data_transfer": f"{base}/abdm/v0.5/health-information/transfer",
+            "patient_share": f"{base}/api/v1/abdm/v3/hip/patient-share",
+            "discover": f"{base}/api/v1/abdm/v0.5/care-contexts/discover",
+            "link_init": f"{base}/api/v1/abdm/v0.5/links/link/init",
+            "link_confirm": f"{base}/api/v1/abdm/v0.5/links/link/confirm",
+            "hip_consent_notify": f"{base}/api/v1/abdm/v0.5/consents/hip/notify",
+            "hip_hi_request": f"{base}/api/v1/abdm/v0.5/health-information/hip/request",
+            "hiu_consent_notify": f"{base}/api/v1/abdm/v0.5/consents/hiu/notify",
+            "hi_transfer": f"{base}/api/v1/abdm/v0.5/health-information/transfer",
         }
 
     def get_endpoint(self, key: str, **path_params: str) -> str:
-        """
-        Build the full URL for an ABDM endpoint.
-
-        Args:
-            key: Endpoint key from ``ABDM_ENDPOINTS``.
-            **path_params: Path parameter substitutions, e.g. facility_id="123".
-
-        Returns:
-            Fully-qualified endpoint URL.
-        """
         path = ABDM_ENDPOINTS[key]
         if path_params:
             path = path.format(**path_params)
-        return f"{self.gateway_url}{path}"
+        return path
 
-    @property
-    def HIU_ID(self) -> str:
-        """Uppercase alias for hiu_id."""
-        return self.hiu_id
-
-    @property
-    def CALLBACK_BASE_URL(self) -> str:
-        """Uppercase alias for callback_base_url."""
-        return self.callback_base_url
+    def public_status(self) -> dict:
+        """Return safe, non-sensitive ABDM integration status (zero secrets)."""
+        has_creds = bool(self.abdm_client_id and self.abdm_client_secret)
+        return {
+            "abdm_env": self.abdm_env.value,
+            "gateway_url": self.gateway_url,
+            "abha_url": self.abha_url,
+            "x_cm_id": self.x_cm_id,
+            "hfr_facility_id": self.hfr_facility_id or "NOT_CONFIGURED",
+            "bridge_id_configured": bool(self.abdm_bridge_id),
+            "credentials_configured": has_creds,
+            "access_status": (
+                "SIMULATED_MOCK"
+                if self.abdm_env == ABDMMode.MOCK
+                else ("CONFIGURED" if has_creds else "PENDING_CREDENTIALS")
+            ),
+        }
 
 
 @lru_cache()
 def get_abdm_settings() -> ABDMSettings:
-    """Return a cached ABDMSettings instance."""
+    """Return cached ABDMSettings instance."""
     return ABDMSettings()

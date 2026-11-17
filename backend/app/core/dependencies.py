@@ -8,7 +8,9 @@ Common FastAPI dependencies re-exported for convenience.
 - Request ID middleware
 """
 
-from typing import Any, Dict, Optional
+from collections import defaultdict, deque
+import time
+from typing import Any, Deque, Dict, Optional
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException, Query, Request, Response, status
@@ -63,13 +65,14 @@ async def _get_rate_limit_redis() -> aioredis.Redis:
     return _redis_pool
 
 
+_memory_rate_buckets: Dict[str, Deque[float]] = defaultdict(deque)
+
+
 class RateLimiter:
-    """Simple sliding-window rate limiter backed by Redis.
+    """Sliding-window rate limiter backed by Redis with an automatic in-memory fallback.
 
-    Usage as a dependency::
-
-        @router.get("/endpoint", dependencies=[Depends(RateLimiter(times=10, seconds=60))])
-        async def my_endpoint(): ...
+    Ensures CERT-In WASA brute-force and OTP-flooding protection remains enforced even
+    in serverless deployments where Redis is unavailable.
     """
 
     def __init__(self, times: int = 60, seconds: int = 60) -> None:
@@ -77,7 +80,8 @@ class RateLimiter:
         self.seconds = seconds
 
     async def __call__(self, request: Request) -> None:
-        client_ip = request.client.host if request.client else "unknown"
+        forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        client_ip = forwarded_for or (request.client.host if request.client else "unknown")
         path = request.url.path
         key = f"rl:{client_ip}:{path}"
 
@@ -90,12 +94,25 @@ class RateLimiter:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Rate limit exceeded. Please try again later.",
+                    headers={"Retry-After": str(self.seconds)},
                 )
+            return
         except HTTPException:
             raise
         except Exception:
-            # If Redis is unavailable, allow the request through
-            pass
+            # Fail-closed with per-process sliding-window fallback
+            now = time.monotonic()
+            cutoff = now - self.seconds
+            bucket = _memory_rate_buckets[key]
+            while bucket and bucket[0] <= cutoff:
+                bucket.popleft()
+            if len(bucket) >= self.times:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded. Please try again later.",
+                    headers={"Retry-After": str(self.seconds)},
+                )
+            bucket.append(now)
 
 
 # ── Request ID middleware ────────────────────────────────────────────────

@@ -13,8 +13,14 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.database import check_db_health
 from app.core.dependencies import RequestIDMiddleware
+from app.core.wasa_security import (
+    SecurityHeadersMiddleware,
+    install_pii_log_filter,
+    mask_pii_text,
+)
 
 settings = get_settings()
+install_pii_log_filter()
 
 
 @asynccontextmanager
@@ -61,14 +67,23 @@ app = FastAPI(
 
 # ── Middleware ───────────────────────────────────────────────────────────────
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "X-Request-ID",
+        "X-CM-ID",
+        "REQUEST-ID",
+        "TIMESTAMP",
+    ],
 )
 
 # ── Global Exception Handlers ────────────────────────────────────────────────
@@ -76,26 +91,31 @@ app.add_middleware(
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    """Preserve standard HTTP exceptions (401, 403, 404) with their original status codes."""
+    """Preserve standard HTTP exceptions (401, 403, 404) with PII-masked detail."""
+    detail = mask_pii_text(exc.detail) if isinstance(exc.detail, str) else exc.detail
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
+        content={"detail": detail},
         headers=getattr(exc, "headers", None),
     )
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Catch unhandled runtime errors, log traceback, and return diagnostic details."""
+    """Catch unhandled runtime errors, log PII-masked traceback, and return WASA-safe response."""
     request_id = getattr(request.state, "request_id", "unknown")
-    print(f"🔥 [Unhandled Server Error] Request ID: {request_id}\n{traceback.format_exc()}")
+    masked_trace = mask_pii_text(traceback.format_exc())
+    print(f"[Unhandled Server Error] Request ID: {request_id}\n{masked_trace}")
+    content: Dict[str, Any] = {
+        "detail": "An internal server error occurred. Please reference the request_id with support.",
+        "request_id": request_id,
+    }
+    if settings.DEBUG:
+        content["debug_detail"] = mask_pii_text(str(exc))
+        content["error_type"] = exc.__class__.__name__
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": f"Internal server error: {str(exc)}",
-            "error_type": exc.__class__.__name__,
-            "request_id": request_id,
-        },
+        content=content,
     )
 
 
@@ -104,16 +124,21 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 @app.get("/health", tags=["System Diagnostics"])
 async def health_check() -> Dict[str, Any]:
-    """Perform health checks on database and schema readiness."""
+    """Perform health checks on database and ABDM adapter readiness (WASA-safe)."""
+    from app.abdm.config import get_abdm_settings
+
+    abdm_cfg = get_abdm_settings()
     db_health = await check_db_health()
+    db_status = db_health["database"]
+    if not settings.DEBUG and db_status != "connected":
+        db_status = "unavailable"
     return {
         "status": db_health["status"],
         "version": settings.VERSION,
-        "database": db_health["database"],
-        "database_host": db_health.get("database_host", "unknown"),
+        "database": db_status,
         "tables_initialized": db_health.get("tables_initialized", False),
-        "users_count": db_health.get("users_count", 0),
         "environment": settings.ENVIRONMENT,
+        "abdm_env": abdm_cfg.abdm_env.value,
     }
 
 

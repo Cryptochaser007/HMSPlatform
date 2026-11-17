@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { abdmApi, patientsApi } from '../services/api';
-import { AbhaProfile } from '../types';
+import { AbhaProfile, AbdmStatus, AbdmShareProfile } from '../types';
 import {
   ShieldCheck,
   CreditCard,
@@ -12,11 +12,60 @@ import {
   QrCode,
   Phone,
   UserPlus,
+  RefreshCw,
 } from 'lucide-react';
 
 export const AbhaPortal: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'create' | 'verify'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'verify' | 'share'>('create');
   const navigate = useNavigate();
+
+  // Live ABDM adapter status & Scan-and-Share queue
+  const [abdmStatus, setAbdmStatus] = useState<AbdmStatus | null>(null);
+  const [shareQueue, setShareQueue] = useState<AbdmShareProfile[]>([]);
+  const [shareLoading, setShareLoading] = useState(false);
+
+  const loadShareQueue = async () => {
+    setShareLoading(true);
+    try {
+      const res = await abdmApi.getShareQueue();
+      setShareQueue(res.items || []);
+    } catch {
+      // ignore if unauthenticated or offline
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    abdmApi.getStatus().then(setAbdmStatus).catch(() => {});
+    loadShareQueue();
+  }, []);
+
+  const handleSimulateQrShare = async () => {
+    setShareLoading(true);
+    try {
+      await abdmApi.triggerPatientShare({
+        requestId: `qr-${Date.now()}`,
+        intent: { type: 'PROFILE_SHARE' },
+        metaData: { hipId: abdmStatus?.hfr_facility_id || 'HMS_HIP_SANDBOX', context: 'OPD-COUNTER-01' },
+        profile: {
+          patient: {
+            abhaNumber: '91-4829-1029-4721',
+            abhaAddress: `arun.kumar@${abdmStatus?.x_cm_id || 'sbx'}`,
+            name: 'Arun Kumar',
+            gender: 'M',
+            yearOfBirth: 1991,
+            identifiers: [{ type: 'MOBILE', value: '9876543210' }],
+          },
+        },
+      });
+      await loadShareQueue();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to simulate Scan & Share');
+    } finally {
+      setShareLoading(false);
+    }
+  };
 
   // Create ABHA states
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -178,12 +227,13 @@ export const AbhaPortal: React.FC = () => {
       <div className="bg-gradient-to-r from-brand-800 via-brand-700 to-indigo-900 rounded-2xl p-6 text-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-xs font-semibold text-emerald-300 mb-2">
-            <ShieldCheck className="w-3.5 h-3.5" /> ABDM Milestone 1 & 2 Certified
+            <ShieldCheck className="w-3.5 h-3.5" /> ABDM v3 M1 / M2 / M3 Adapter • Mode:{' '}
+            {abdmStatus?.abdm_env || 'MOCK'}
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Ayushman Bharat Health Account (ABHA) Portal</h1>
           <p className="text-sm text-brand-100 mt-1 max-w-2xl">
             Generate 14-digit ABHA Numbers via Aadhaar e-KYC, verify digital health profiles on the National Health
-            Authority (NHA) gateway, and link longitudinal health records seamlessly.
+            Authority (NHA) gateway, and manage ABHA QR Scan &amp; Share OPD check-ins.
           </p>
         </div>
         <div className="bg-white/10 backdrop-blur-md border border-white/20 p-4 rounded-xl flex items-center gap-3 self-start md:self-auto">
@@ -191,14 +241,18 @@ export const AbhaPortal: React.FC = () => {
             <CreditCard className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-xs uppercase font-medium text-brand-200">ABDM Registry</div>
-            <div className="text-sm font-bold text-white">Gateway Connected</div>
+            <div className="text-xs uppercase font-medium text-brand-200">
+              X-CM-ID: {abdmStatus?.x_cm_id || 'sbx'}
+            </div>
+            <div className="text-sm font-bold text-white">
+              {abdmStatus?.abdm_env === 'MOCK' ? 'Sandbox Simulation' : abdmStatus?.access_status || 'Connected'}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex border-b border-slate-200 bg-white rounded-t-xl px-4 pt-2 gap-4">
+      <div className="flex flex-wrap border-b border-slate-200 bg-white rounded-t-xl px-4 pt-2 gap-4">
         <button
           onClick={() => setActiveTab('create')}
           className={`pb-3 px-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors ${
@@ -220,6 +274,25 @@ export const AbhaPortal: React.FC = () => {
         >
           <Search className="w-4 h-4" />
           Verify & Search Existing ABHA ID
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('share');
+            loadShareQueue();
+          }}
+          className={`pb-3 px-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors ${
+            activeTab === 'share'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <QrCode className="w-4 h-4" />
+          Scan &amp; Share OPD Counter
+          {shareQueue.length > 0 && (
+            <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded-full font-bold">
+              {shareQueue.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -681,6 +754,108 @@ export const AbhaPortal: React.FC = () => {
                 <div className="text-[11px] text-slate-500">Arun Kumar • Bengaluru Urban</div>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: M1 ABHA QR SCAN & SHARE OPD COUNTER */}
+      {activeTab === 'share' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Live ABHA QR Scan &amp; Share Check-In Queue
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Webhook Receiver: <code className="font-mono text-brand-700">/api/v1/abdm/v3/hip/patient-share</code>
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSimulateQrShare}
+                  disabled={shareLoading}
+                  className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  <QrCode className="w-3.5 h-3.5" /> Simulate QR Check-In
+                </button>
+                <button
+                  onClick={loadShareQueue}
+                  disabled={shareLoading}
+                  className="py-2 px-3 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${shareLoading ? 'animate-spin' : ''}`} /> Refresh
+                </button>
+              </div>
+            </div>
+
+            {shareQueue.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-300 space-y-2">
+                <QrCode className="w-10 h-10 text-slate-400 mx-auto" />
+                <div className="text-sm font-semibold text-slate-700">No Scan &amp; Share check-ins yet</div>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  When a patient scans the OPD Counter QR code using the ABHA PHR App, their verified profile and
+                  instant counter token appear here automatically.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
+                {shareQueue.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="px-3 py-2 bg-brand-600 text-white rounded-lg font-mono font-bold text-xs">
+                        {item.token_number}
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-900">
+                          {item.patient_name}{' '}
+                          <span className="text-xs font-normal text-slate-500">
+                            ({item.gender} • YOB {item.year_of_birth || '—'})
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-600 font-mono">
+                          {item.abha_address} {item.abha_number ? `• ${item.abha_number}` : ''}
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          Counter: {item.counter_id || 'OPD-01'} • Mobile: {item.mobile_masked || 'Masked'}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() =>
+                        handleImportToPatient({
+                          health_id: item.abha_address,
+                          health_id_number: item.abha_number || '91-4829-1029-4721',
+                          name: item.patient_name,
+                          gender: item.gender,
+                          year_of_birth: item.year_of_birth || 1990,
+                        })
+                      }
+                      className="py-1.5 px-3 bg-slate-900 hover:bg-brand-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shrink-0"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Register &amp; Check-In
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col items-center text-center space-y-3">
+            <div className="p-4 bg-white border-2 border-slate-900 rounded-2xl shadow-sm">
+              <QrCode className="w-32 h-32 text-slate-900" />
+            </div>
+            <div className="text-sm font-bold text-slate-900">OPD Registration Counter QR</div>
+            <div className="text-xs text-slate-600 font-mono">
+              HFR ID: {abdmStatus?.hfr_facility_id || 'HMS_HIP_SANDBOX'}
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              ABDM Milestone 1 Scan &amp; Share desk poster. Patients scan with any ABHA PHR app to share verified
+              demographics without manual data entry.
+            </p>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 """Patient model with encrypted PII fields and ABDM linkage."""
 
-from sqlalchemy import Column, Date, Enum as SAEnum, String, Text
+from sqlalchemy import Column, Date, DateTime, Enum as SAEnum, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -22,7 +22,9 @@ class Patient(Base):
 
     # ABDM fields
     abha_id = Column(String(50), unique=True, nullable=True, index=True)
-    abha_address = Column(String(255), nullable=True)
+    abha_address = Column(String(255), nullable=True, index=True)
+    abha_kyc_status = Column(String(30), nullable=False, default="UNVERIFIED")
+    abha_verified_at = Column(DateTime(timezone=True), nullable=True)
 
     # PII — encrypted at rest
     first_name = Column(EncryptedType, nullable=False)

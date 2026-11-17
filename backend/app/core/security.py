@@ -93,6 +93,7 @@ def decode_token(token: str) -> Dict[str, Any]:
 # ── Token blacklist (Redis) ─────────────────────────────────────────────
 
 _redis_pool: Optional[aioredis.Redis] = None
+_memory_blacklist: Dict[str, float] = {}
 
 
 async def _get_redis() -> aioredis.Redis:
@@ -105,14 +106,27 @@ async def _get_redis() -> aioredis.Redis:
     return _redis_pool
 
 
-async def blacklist_token(jti: str, expires_in: int) -> None:
-    """Add a JTI to the Redis blacklist until its natural expiry."""
-    r = await _get_redis()
-    await r.setex(f"bl:{jti}", expires_in, "1")
+async def blacklist_token(jti: str, expires_in: int = 3600) -> None:
+    """Add a JTI to the Redis blacklist (and local fallback) until its natural expiry."""
+    import time
+
+    _memory_blacklist[jti] = time.time() + max(expires_in, 60)
+    try:
+        r = await _get_redis()
+        await r.setex(f"bl:{jti}", max(expires_in, 60), "1")
+    except Exception:
+        pass
 
 
 async def is_token_blacklisted(jti: str) -> bool:
     """Return True if the JTI has been blacklisted."""
+    import time
+
+    exp = _memory_blacklist.get(jti)
+    if exp is not None:
+        if exp > time.time():
+            return True
+        _memory_blacklist.pop(jti, None)
     try:
         r = await _get_redis()
         return await r.exists(f"bl:{jti}") > 0

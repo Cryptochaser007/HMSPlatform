@@ -14,6 +14,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    is_token_blacklisted,
     verify_password,
 )
 from app.models.user import User
@@ -67,6 +68,12 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token is not a refresh token",
             )
+        old_jti = payload.get("jti")
+        if old_jti and await is_token_blacklisted(old_jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has already been rotated or revoked",
+            )
         user_id = payload.get("sub")
         result = await db.execute(
             select(User).where(User.id == user_id, User.is_deleted == False)  # noqa: E712
@@ -77,6 +84,11 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found or inactive",
             )
+        # Rotate refresh token: revoke the consumed refresh token JTI immediately
+        if old_jti:
+            exp_ts = payload.get("exp")
+            ttl = max(int(exp_ts - datetime.now(timezone.utc).timestamp()), 60) if isinstance(exp_ts, (int, float)) else 604800
+            await blacklist_token(old_jti, expires_in=ttl)
         return self.create_tokens(user)
 
     async def register_user(self, db: AsyncSession, data: UserCreate) -> User:

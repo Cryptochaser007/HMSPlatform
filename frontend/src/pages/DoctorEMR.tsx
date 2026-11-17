@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { encountersApi, clinicalApi } from '../services/api';
 import { Encounter, Vitals, PrescriptionItem, LabResultItem } from '../types';
 import { DigitalRxModal } from '../components/common/DigitalRxModal';
+import { HIULongitudinalPanel } from '../components/emr/HIULongitudinalPanel';
 import {
   Stethoscope,
   Activity,
@@ -19,6 +20,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Printer,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface ClinicalTemplate {
@@ -297,7 +299,7 @@ export const DoctorEMR: React.FC = () => {
   const navigate = useNavigate();
   const encounterIdFromUrl = searchParams.get('encounter_id');
 
-  const [activeTab, setActiveTab] = useState<'soap' | 'labs'>('soap');
+  const [activeTab, setActiveTab] = useState<'soap' | 'labs' | 'hiu'>('soap');
   const [encounters, setEncounters] = useState<Encounter[]>([]);
   const [selectedEncounterId, setSelectedEncounterId] = useState<string>(encounterIdFromUrl || '');
   const [loading, setLoading] = useState(true);
@@ -597,6 +599,17 @@ export const DoctorEMR: React.FC = () => {
           <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.2 rounded-full font-bold">
             5 Abnormal
           </span>
+        </button>
+        <button
+          onClick={() => setActiveTab('hiu')}
+          className={`pb-3 px-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors ${
+            activeTab === 'hiu'
+              ? 'border-brand-600 text-brand-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+          ABDM Longitudinal Record (M3 HIU)
         </button>
       </div>
 
@@ -1008,6 +1021,17 @@ export const DoctorEMR: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB 3: M3 ABDM HIU LONGITUDINAL HEALTH RECORD */}
+      {activeTab === 'hiu' && (
+        <HIULongitudinalPanel
+          defaultPatientAbha={
+            activeEncounter?.patient?.abha_id
+              ? activeEncounter.patient.abha_id
+              : 'arun.kumar@sbx'
+          }
+        />
       )}
 
       {/* Digital Prescription & Dispatch Modal */}

@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.dependencies import PaginationParams, get_pagination
 from app.core.rbac import Permission, Role
 from app.core.security import get_current_user, require_permissions
+from app.core.wasa_security import mask_identifier, mask_pii_dict
 from app.models.consent import Consent, ConsentStatus, ConsentType
 from app.models.patient import Patient
 from app.schemas.consent import ConsentCreate, ConsentResponse
@@ -49,7 +50,10 @@ async def register_patient(
         action=AuditAction.CREATE,
         entity_type="Patient",
         entity_id=str(patient.id),
-        new_value={"uhid": patient.registration_number, "abha_id": patient.abha_id},
+        new_value={
+            "uhid": patient.registration_number,
+            "abha_id": mask_identifier(str(patient.abha_id), 4) if patient.abha_id else None,
+        },
     )
     return PatientResponse.model_validate(patient)
 
@@ -112,7 +116,7 @@ async def update_patient(
         action=AuditAction.UPDATE,
         entity_type="Patient",
         entity_id=patient_id,
-        new_value=data.model_dump(exclude_unset=True),
+        new_value=mask_pii_dict(data.model_dump(exclude_unset=True)),
     )
     return PatientResponse.model_validate(patient)
 

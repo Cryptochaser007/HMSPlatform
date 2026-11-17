@@ -9,6 +9,10 @@ import {
   AbhaProfile,
   SignupData,
   WardOccupancyStats,
+  AbdmStatus,
+  AbdmShareProfile,
+  AbdmConsentArtefact,
+  LongitudinalTimelineRecord,
 } from '../types';
 
 // In production, Vite routes /api/v1 through Vercel rewrites to backend directly.
@@ -110,6 +114,10 @@ export const clinicalApi = {
 };
 
 export const abdmApi = {
+  getStatus: async (): Promise<AbdmStatus> => {
+    const res = await api.get<AbdmStatus>('/abdm/status');
+    return res.data;
+  },
   generateAadhaarOtp: async (aadhaar_number: string): Promise<{ txnId?: string; txn_id?: string; message?: string; mobileNumber?: string }> => {
     const res = await api.post('/abdm/abha/aadhaar/otp', { aadhaar_number });
     return res.data;
@@ -118,8 +126,61 @@ export const abdmApi = {
     const res = await api.post('/abdm/abha/aadhaar/verify', { txn_id, otp });
     return res.data;
   },
+  generateMobileOtp: async (mobile_number: string): Promise<{ txnId?: string; message?: string }> => {
+    const res = await api.post('/abdm/abha/mobile/otp', { mobile_number });
+    return res.data;
+  },
+  verifyMobileOtp: async (txn_id: string, otp: string): Promise<any> => {
+    const res = await api.post('/abdm/abha/mobile/verify', { txn_id, otp });
+    return res.data;
+  },
+  searchAbhaAddress: async (abha_id: string): Promise<any> => {
+    const res = await api.post('/abdm/abha/address/search', { abha_id });
+    return res.data;
+  },
   getAbhaProfile: async (abhaId: string): Promise<AbhaProfile> => {
     const res = await api.get<AbhaProfile>(`/abdm/abha/${encodeURIComponent(abhaId)}/profile`);
+    return res.data;
+  },
+  triggerPatientShare: async (payload: any): Promise<any> => {
+    const res = await api.post('/abdm/v3/hip/patient-share', payload);
+    return res.data;
+  },
+  getShareQueue: async (): Promise<{ items: AbdmShareProfile[]; total: number }> => {
+    const res = await api.get('/abdm/v3/hip/patient-share/queue');
+    return res.data;
+  },
+  requestHiuConsent: async (payload: {
+    patient_abha: string;
+    purpose: string;
+    purpose_code: string;
+    date_from: string;
+    date_to: string;
+    hi_types: string[];
+  }): Promise<AbdmConsentArtefact & { message?: string }> => {
+    const res = await api.post('/abdm/hiu/consent/request', payload);
+    return res.data;
+  },
+  listHiuConsents: async (patient_abha?: string): Promise<{ items: AbdmConsentArtefact[]; total: number }> => {
+    const res = await api.get('/abdm/hiu/consents', { params: { patient_abha } });
+    return res.data;
+  },
+  fetchHiuHealthInfo: async (
+    consent_artefact_id: string
+  ): Promise<{
+    transaction_id: string;
+    status: string;
+    encryption_verified?: string;
+    records_decrypted?: number;
+    timeline?: LongitudinalTimelineRecord[];
+  }> => {
+    const res = await api.post('/abdm/hiu/health-info/fetch', { consent_artefact_id });
+    return res.data;
+  },
+  getLongitudinalRecords: async (
+    patient_abha: string
+  ): Promise<{ items: LongitudinalTimelineRecord[]; total: number }> => {
+    const res = await api.get(`/abdm/hiu/records/${encodeURIComponent(patient_abha)}`);
     return res.data;
   },
 };

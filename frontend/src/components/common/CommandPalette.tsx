@@ -336,3 +336,4 @@ export const CommandPalette: React.FC<{ isOpen: boolean; onClose: () => void }> 
     </div>
   );
 };
+

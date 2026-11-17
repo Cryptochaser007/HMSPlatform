@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, audit_log, get_audit_logger
 from app.core.database import get_db
+from app.core.dependencies import RateLimiter
 from app.core.rbac import Permission, Role
 from app.core.security import get_current_user, require_permissions, require_roles
 from app.schemas.user import ChangePassword, Token, UserCreate, UserLogin, UserResponse
@@ -15,7 +16,11 @@ from app.services.auth_service import auth_service
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post("/login", response_model=Token)
+@router.post(
+    "/login",
+    response_model=Token,
+    dependencies=[Depends(RateLimiter(times=10, seconds=60))],
+)
 async def login(
     credentials: UserLogin,
     request: Request,
@@ -39,7 +44,11 @@ async def login(
     return tokens
 
 
-@router.post("/refresh", response_model=Token)
+@router.post(
+    "/refresh",
+    response_model=Token,
+    dependencies=[Depends(RateLimiter(times=20, seconds=60))],
+)
 async def refresh_token(
     refresh_token: str,
     db: AsyncSession = Depends(get_db),
@@ -76,6 +85,7 @@ async def logout(
     "/signup",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(RateLimiter(times=5, seconds=60))],
 )
 async def signup(
     data: UserCreate,

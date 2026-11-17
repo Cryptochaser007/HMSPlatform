@@ -26,6 +26,7 @@ class PatientBase(BaseModel):
 
 class PatientCreate(PatientBase):
     abha_id: Optional[str] = None
+    abha_address: Optional[str] = None
     aadhaar_number: Optional[str] = Field(None, min_length=12, max_length=12)
 
 
@@ -44,6 +45,7 @@ class PatientUpdate(BaseModel):
     emergency_contact_phone: Optional[str] = None
     allergies: Optional[List[str]] = None
     abha_id: Optional[str] = None
+    abha_address: Optional[str] = None
 
 
 class PatientResponse(BaseModel):
@@ -51,6 +53,9 @@ class PatientResponse(BaseModel):
     id: str
     registration_number: str
     abha_id: Optional[str] = None
+    abha_address: Optional[str] = None
+    abha_kyc_status: Optional[str] = "UNVERIFIED"
+    abha_verified_at: Optional[datetime] = None
     first_name: str
     last_name: str
     date_of_birth: date

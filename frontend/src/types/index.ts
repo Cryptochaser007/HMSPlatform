@@ -175,5 +175,63 @@ export interface WardOccupancyStats {
   occupancy_rate: number;
 }
 
+export interface AbdmStatus {
+  abdm_env: 'MOCK' | 'SANDBOX' | 'PRODUCTION';
+  gateway_url: string;
+  abha_url: string;
+  x_cm_id: string;
+  hfr_facility_id: string;
+  bridge_id_configured: boolean;
+  credentials_configured: boolean;
+  access_status: string;
+}
+
+export interface AbdmShareProfile {
+  id: string;
+  request_id: string;
+  hip_id: string;
+  counter_id?: string;
+  token_number: string;
+  abha_number?: string;
+  abha_address: string;
+  patient_name: string;
+  gender: string;
+  year_of_birth?: number;
+  mobile_masked?: string;
+  patient_id?: string;
+  status: string;
+  expires_at?: string;
+  created_at?: string;
+}
+
+export interface AbdmConsentArtefact {
+  consent_id: string;
+  consent_request_id?: string;
+  patient_abha: string;
+  purpose_code: string;
+  purpose_text: string;
+  status: 'REQUESTED' | 'GRANTED' | 'DENIED' | 'REVOKED' | 'EXPIRED';
+  hi_types: string[];
+  date_from: string;
+  date_to: string;
+  created_at?: string;
+  abdm_mode?: string;
+}
+
+export interface LongitudinalTimelineRecord {
+  bundle_id: string;
+  document_type: string;
+  date: string;
+  facility_name: string;
+  practitioner_name: string;
+  care_context_reference?: string;
+  decryption_cipher?: string;
+  diagnoses: string[];
+  medications: { name: string; dosage: string }[];
+  observations: { name: string; value: number | string; unit: string }[];
+  diagnostic_reports: { title: string; conclusion: string }[];
+}
+
+
 
 

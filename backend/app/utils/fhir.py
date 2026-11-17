@@ -281,3 +281,395 @@ def build_bundle(resources: List[Dict[str, Any]], bundle_type: str = "document")
         ],
     }
 
+
+def build_practitioner_resource(
+    practitioner_id: str,
+    name: str,
+    registration_number: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build NRCeS FHIR R4 Practitioner resource."""
+    resource: Dict[str, Any] = {
+        "resourceType": "Practitioner",
+        "id": practitioner_id,
+        "meta": {
+            "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Practitioner"]
+        },
+        "name": [{"text": name}],
+    }
+    if registration_number:
+        resource["identifier"] = [
+            {
+                "system": "https://doctor.ndhm.gov.in",
+                "value": registration_number,
+            }
+        ]
+    return resource
+
+
+def build_organization_resource(
+    org_id: str,
+    name: str,
+    hfr_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build NRCeS FHIR R4 Organization resource."""
+    return {
+        "resourceType": "Organization",
+        "id": org_id,
+        "meta": {
+            "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Organization"]
+        },
+        "identifier": [
+            {
+                "system": "https://facility.ndhm.gov.in",
+                "value": hfr_id or org_id,
+            }
+        ],
+        "name": name,
+    }
+
+
+def build_diagnostic_report_resource(
+    report_id: str,
+    patient_id: str,
+    encounter_id: str,
+    title: str,
+    conclusion: str,
+    observation_ids: List[str],
+    issued: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build NRCeS FHIR R4 DiagnosticReportLab resource."""
+    return {
+        "resourceType": "DiagnosticReport",
+        "id": report_id,
+        "meta": {
+            "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/DiagnosticReportLab"]
+        },
+        "status": "final",
+        "category": [
+            {
+                "coding": [
+                    {
+                        "system": "http://snomed.info/sct",
+                        "code": "4241000179101",
+                        "display": "Laboratory report",
+                    }
+                ]
+            }
+        ],
+        "code": {"text": title},
+        "subject": {"reference": f"Patient/{patient_id}"},
+        "encounter": {"reference": f"Encounter/{encounter_id}"},
+        "issued": issued or datetime.now(timezone.utc).isoformat(),
+        "result": [{"reference": f"Observation/{oid}"} for oid in observation_ids],
+        "conclusion": conclusion,
+    }
+
+
+def build_op_consult_bundle(
+    *,
+    patient: Dict[str, Any],
+    practitioner: Dict[str, Any],
+    organization: Dict[str, Any],
+    encounter: Dict[str, Any],
+    conditions: Optional[List[Dict[str, Any]]] = None,
+    observations: Optional[List[Dict[str, Any]]] = None,
+    medications: Optional[List[Dict[str, Any]]] = None,
+    chief_complaint: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Assemble an NRCeS-compliant FHIR R4 OPConsultRecord Document Bundle."""
+    conditions = conditions or []
+    observations = observations or []
+    medications = medications or []
+
+    sections: List[Dict[str, Any]] = []
+    if conditions:
+        sections.append(
+            {
+                "title": "Chief complaints and Diagnosis",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "422843007",
+                            "display": "Chief complaint section",
+                        }
+                    ]
+                },
+                "entry": [{"reference": f"Condition/{c['id']}"} for c in conditions],
+            }
+        )
+    if observations:
+        sections.append(
+            {
+                "title": "Physical Examination & Vitals",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "425044008",
+                            "display": "Physical exam section",
+                        }
+                    ]
+                },
+                "entry": [{"reference": f"Observation/{o['id']}"} for o in observations],
+            }
+        )
+    if medications:
+        sections.append(
+            {
+                "title": "Medications",
+                "code": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "721912009",
+                            "display": "Medication summary document",
+                        }
+                    ]
+                },
+                "entry": [{"reference": f"MedicationRequest/{m['id']}"} for m in medications],
+            }
+        )
+
+    composition = {
+        "resourceType": "Composition",
+        "id": str(uuid.uuid4()),
+        "meta": {
+            "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/OPConsultRecord"]
+        },
+        "status": "final",
+        "type": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "371530004",
+                    "display": "Clinical consultation report",
+                }
+            ],
+            "text": chief_complaint or "OP Consultation Record",
+        },
+        "subject": {"reference": f"Patient/{patient['id']}"},
+        "encounter": {"reference": f"Encounter/{encounter['id']}"},
+        "date": datetime.now(timezone.utc).isoformat(),
+        "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
+        "custodian": {"reference": f"Organization/{organization['id']}"},
+        "title": "OP Consultation Record",
+        "section": sections,
+    }
+
+    resources = [
+        composition,
+        patient,
+        practitioner,
+        organization,
+        encounter,
+        *conditions,
+        *observations,
+        *medications,
+    ]
+    return build_bundle(resources, bundle_type="document")
+
+
+def build_prescription_bundle(
+    *,
+    patient: Dict[str, Any],
+    practitioner: Dict[str, Any],
+    organization: Dict[str, Any],
+    encounter: Dict[str, Any],
+    medications: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Assemble an NRCeS-compliant FHIR R4 PrescriptionRecord Document Bundle."""
+    composition = {
+        "resourceType": "Composition",
+        "id": str(uuid.uuid4()),
+        "meta": {
+            "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/PrescriptionRecord"]
+        },
+        "status": "final",
+        "type": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "440545006",
+                    "display": "Prescription record",
+                }
+            ],
+            "text": "Prescription Record",
+        },
+        "subject": {"reference": f"Patient/{patient['id']}"},
+        "encounter": {"reference": f"Encounter/{encounter['id']}"},
+        "date": datetime.now(timezone.utc).isoformat(),
+        "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
+        "custodian": {"reference": f"Organization/{organization['id']}"},
+        "title": "Prescription Record",
+        "section": [
+            {
+                "title": "Prescription",
+                "entry": [{"reference": f"MedicationRequest/{m['id']}"} for m in medications],
+            }
+        ],
+    }
+    return build_bundle(
+        [composition, patient, practitioner, organization, encounter, *medications],
+        bundle_type="document",
+    )
+
+
+def build_diagnostic_report_bundle(
+    *,
+    patient: Dict[str, Any],
+    practitioner: Dict[str, Any],
+    organization: Dict[str, Any],
+    encounter: Dict[str, Any],
+    report: Dict[str, Any],
+    observations: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Assemble an NRCeS-compliant FHIR R4 DiagnosticReportRecord Document Bundle."""
+    composition = {
+        "resourceType": "Composition",
+        "id": str(uuid.uuid4()),
+        "meta": {
+            "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/DiagnosticReportRecord"]
+        },
+        "status": "final",
+        "type": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "721981007",
+                    "display": "Diagnostic studies report",
+                }
+            ],
+            "text": "Diagnostic Report",
+        },
+        "subject": {"reference": f"Patient/{patient['id']}"},
+        "encounter": {"reference": f"Encounter/{encounter['id']}"},
+        "date": datetime.now(timezone.utc).isoformat(),
+        "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
+        "custodian": {"reference": f"Organization/{organization['id']}"},
+        "title": "Diagnostic Report",
+        "section": [
+            {
+                "title": "Diagnostic Reports",
+                "entry": [{"reference": f"DiagnosticReport/{report['id']}"}],
+            }
+        ],
+    }
+    return build_bundle(
+        [composition, patient, practitioner, organization, encounter, report, *observations],
+        bundle_type="document",
+    )
+
+
+def build_discharge_summary_bundle(
+    *,
+    patient: Dict[str, Any],
+    practitioner: Dict[str, Any],
+    organization: Dict[str, Any],
+    encounter: Dict[str, Any],
+    conditions: Optional[List[Dict[str, Any]]] = None,
+    medications: Optional[List[Dict[str, Any]]] = None,
+    summary_text: str = "Patient discharged in stable condition.",
+) -> Dict[str, Any]:
+    """Assemble an NRCeS-compliant FHIR R4 DischargeSummaryRecord Document Bundle."""
+    conditions = conditions or []
+    medications = medications or []
+
+    composition = {
+        "resourceType": "Composition",
+        "id": str(uuid.uuid4()),
+        "meta": {
+            "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/DischargeSummaryRecord"]
+        },
+        "status": "final",
+        "type": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "373942005",
+                    "display": "Discharge summary",
+                }
+            ],
+            "text": "Discharge Summary",
+        },
+        "subject": {"reference": f"Patient/{patient['id']}"},
+        "encounter": {"reference": f"Encounter/{encounter['id']}"},
+        "date": datetime.now(timezone.utc).isoformat(),
+        "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
+        "custodian": {"reference": f"Organization/{organization['id']}"},
+        "title": "Discharge Summary",
+        "section": [
+            {
+                "title": "Hospital Course & Summary",
+                "text": {"status": "generated", "div": f"<div>{summary_text}</div>"},
+                "entry": [{"reference": f"Condition/{c['id']}"} for c in conditions],
+            },
+            {
+                "title": "Discharge Medications",
+                "entry": [{"reference": f"MedicationRequest/{m['id']}"} for m in medications],
+            },
+        ],
+    }
+    return build_bundle(
+        [composition, patient, practitioner, organization, encounter, *conditions, *medications],
+        bundle_type="document",
+    )
+
+
+def parse_fhir_bundle_to_timeline(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract a structured clinical timeline entry from a decrypted FHIR R4 Document Bundle."""
+    entries = bundle.get("entry") or []
+    resources = [e.get("resource", {}) for e in entries if isinstance(e, dict)]
+
+    comp = next((r for r in resources if r.get("resourceType") == "Composition"), {})
+    org = next((r for r in resources if r.get("resourceType") == "Organization"), {})
+    prac = next((r for r in resources if r.get("resourceType") == "Practitioner"), {})
+    conditions = [r for r in resources if r.get("resourceType") == "Condition"]
+    observations = [r for r in resources if r.get("resourceType") == "Observation"]
+    meds = [r for r in resources if r.get("resourceType") == "MedicationRequest"]
+    reports = [r for r in resources if r.get("resourceType") == "DiagnosticReport"]
+
+    practitioner_name = "Consulting Physician"
+    if prac.get("name") and isinstance(prac["name"], list):
+        practitioner_name = prac["name"][0].get("text") or practitioner_name
+
+    return {
+        "bundle_id": bundle.get("id", str(uuid.uuid4())),
+        "document_type": comp.get("title") or comp.get("type", {}).get("text") or "Clinical Document",
+        "date": comp.get("date") or bundle.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "facility_name": org.get("name") or "External ABDM Facility",
+        "practitioner_name": practitioner_name,
+        "diagnoses": [
+            c.get("code", {}).get("text")
+            or (c.get("code", {}).get("coding", [{}])[0].get("display") if c.get("code", {}).get("coding") else "Condition")
+            for c in conditions
+        ],
+        "medications": [
+            {
+                "name": m.get("medicationCodeableConcept", {}).get("text", "Medication"),
+                "dosage": (
+                    m.get("dosageInstruction", [{}])[0].get("text", "")
+                    if m.get("dosageInstruction")
+                    else ""
+                ),
+            }
+            for m in meds
+        ],
+        "observations": [
+            {
+                "name": o.get("code", {}).get("text", "Observation"),
+                "value": o.get("valueQuantity", {}).get("value"),
+                "unit": o.get("valueQuantity", {}).get("unit", ""),
+            }
+            for o in observations
+        ],
+        "diagnostic_reports": [
+            {
+                "title": r.get("code", {}).get("text", "Diagnostic Report"),
+                "conclusion": r.get("conclusion", ""),
+            }
+            for r in reports
+        ],
+    }
+
+

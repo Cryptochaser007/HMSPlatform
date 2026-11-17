@@ -12,6 +12,12 @@ from app.models.ward import Ward, WardType, Bed, BedStatus, BedType, Admission, 
 from app.models.quality import QualityIndicator, QualityMeasurement, IncidentReport, IncidentType, IncidentSeverity, IncidentStatus
 from app.models.consent import Consent, ConsentType, ConsentStatus
 from app.models.audit import AuditLog
+from app.models.abdm import (
+    ABDMShareProfile,
+    ABDMCareContextLink,
+    ABDMConsentArtefact,
+    ABDMTransactionLog,
+)
 
 __all__ = [
     "User",
@@ -26,5 +32,6 @@ __all__ = [
     "QualityIndicator", "QualityMeasurement", "IncidentReport", "IncidentType", "IncidentSeverity", "IncidentStatus",
     "Consent", "ConsentType", "ConsentStatus",
     "AuditLog",
+    "ABDMShareProfile", "ABDMCareContextLink", "ABDMConsentArtefact", "ABDMTransactionLog",
 ]
 
