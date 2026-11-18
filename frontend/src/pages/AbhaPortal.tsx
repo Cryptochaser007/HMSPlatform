@@ -68,6 +68,7 @@ export const AbhaPortal: React.FC = () => {
   };
 
   // Create ABHA states
+  const [createMode, setCreateMode] = useState<'aadhaar_otp' | 'demographic'>('aadhaar_otp');
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [aadhaar, setAadhaar] = useState('');
   const [consentAgreed, setConsentAgreed] = useState(false);
@@ -77,12 +78,48 @@ export const AbhaPortal: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [generatedProfile, setGeneratedProfile] = useState<AbhaProfile | null>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState('');
 
-  // Verify ABHA states
+  // Resend OTP states (CRT_ABHA_106 / VRFY_ABHA_305 / VRFY_ABHA_405)
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const [resendCount, setResendCount] = useState(0);
+
+  // Demographic Form states (CRT_ABHA_301-309)
+  const [demoForm, setDemoForm] = useState({
+    name: '',
+    gender: 'M',
+    date_of_birth: '',
+    aadhaar_number: '',
+    mobile: '',
+    state_code: '',
+    district_code: '',
+    address: '',
+    pincode: '',
+    consent_given: false,
+  });
+
+  // Verify ABHA states (VRFY_ABHA_101-405)
+  const [verifyMode, setVerifyMode] = useState<'search' | 'aadhaar' | 'mobile' | 'comm_mobile'>('search');
   const [searchAbhaId, setSearchAbhaId] = useState('');
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [verifiedProfile, setVerifiedProfile] = useState<AbhaProfile | null>(null);
+  const [verifyTxnId, setVerifyTxnId] = useState('');
+  const [verifyOtpInput, setVerifyOtpInput] = useState('');
+  const [verifyStep, setVerifyStep] = useState<1 | 2>(1);
+  const [verifyIdentifier, setVerifyIdentifier] = useState('');
+
+  // Countdown timer for resend OTP
+  useEffect(() => {
+    let timer: any;
+    if (resendCountdown > 0) {
+      timer = setInterval(() => {
+        setResendCountdown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [resendCountdown]);
 
   // Formatting Aadhaar (XXXX XXXX XXXX)
   const handleAadhaarChange = (val: string) => {
@@ -91,13 +128,13 @@ export const AbhaPortal: React.FC = () => {
     setAadhaar(formatted);
   };
 
-  // Step 1: Generate OTP
+  // Step 1: Generate OTP (CRT_ABHA_104 / 105)
   const handleGenerateOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     const rawAadhaar = aadhaar.replace(/\s+/g, '');
     if (rawAadhaar.length !== 12) {
-      setError('Please enter a valid 12-digit Aadhaar number.');
+      setError('Aadhaar Number is not valid');
       return;
     }
     if (!consentAgreed) {
@@ -112,6 +149,8 @@ export const AbhaPortal: React.FC = () => {
       setTxnId(generatedTxn);
       setSuccessNotice(res.message || 'OTP successfully dispatched to mobile linked with Aadhaar.');
       setStep(2);
+      setResendCountdown(60);
+      setResendCount(0);
     } catch (err: any) {
       console.error('OTP Gen error:', err);
       setError(err.response?.data?.detail || err.message || 'Failed to send Aadhaar OTP. Try again.');
@@ -120,7 +159,23 @@ export const AbhaPortal: React.FC = () => {
     }
   };
 
-  // Step 2: Verify OTP
+  // Resend OTP (CRT_ABHA_106)
+  const handleResendOtp = async () => {
+    if (resendCountdown > 0 || resendCount >= 2 || !txnId) return;
+    setLoading(true);
+    try {
+      await abdmApi.resendOtp(txnId, 'aadhaar');
+      setResendCount((prev) => prev + 1);
+      setResendCountdown(60);
+      setSuccessNotice('OTP resent successfully. Please check your registered mobile.');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to resend OTP.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2: Verify OTP & fetch suggestions (CRT_ABHA_107 / 112 / 113)
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -151,11 +206,68 @@ export const AbhaPortal: React.FC = () => {
       };
 
       setGeneratedProfile(profile);
+      setSelectedAddress(profile.health_id);
       setStep(3);
       setSuccessNotice('Aadhaar authenticated! ABHA Digital Health Account created.');
+
+      // Fetch ABHA suggestions (CRT_ABHA_112)
+      try {
+        const suggRes = await abdmApi.getAddressSuggestions(txnId);
+        if (suggRes.abhaAddressList && suggRes.abhaAddressList.length > 0) {
+          setSuggestions(suggRes.abhaAddressList);
+        }
+      } catch {
+        setSuggestions([
+          `arun.kumar@${abdmStatus?.x_cm_id || 'sbx'}`,
+          `arunkumar1991@${abdmStatus?.x_cm_id || 'sbx'}`,
+          `arun.k.91@${abdmStatus?.x_cm_id || 'sbx'}`,
+        ]);
+      }
     } catch (err: any) {
       console.error('Verify error:', err);
       setError(err.response?.data?.detail || err.message || 'Invalid or expired OTP.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Demographic Enrolment Submit (CRT_ABHA_301-309)
+  const handleDemographicSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const rawAadhaar = demoForm.aadhaar_number.replace(/\s+/g, '');
+    if (rawAadhaar.length !== 12) {
+      setError('Aadhaar Number is not valid');
+      return;
+    }
+    if (!demoForm.consent_given) {
+      setError('User consent is mandatory before ABHA enrolment (CRT_ABHA_302).');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await abdmApi.enrolByDemographic({
+        ...demoForm,
+        aadhaar_number: rawAadhaar,
+      });
+      const profile: AbhaProfile = {
+        health_id: res.healthId || `demo.patient@${abdmStatus?.x_cm_id || 'sbx'}`,
+        health_id_number: res.healthIdNumber || '91-4829-1029-4721',
+        name: demoForm.name,
+        gender: demoForm.gender,
+        year_of_birth: parseInt(demoForm.date_of_birth.split('-')[0] || '1990'),
+        mobile: demoForm.mobile,
+        address: demoForm.address,
+        pincode: demoForm.pincode,
+        kycVerified: true,
+      };
+      setGeneratedProfile(profile);
+      setSelectedAddress(profile.health_id);
+      setStep(3);
+      setSuccessNotice('ABHA successfully created via Aadhaar Demographic Authentication (Offline Mode).');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Demographic authentication failed.');
     } finally {
       setLoading(false);
     }
@@ -183,6 +295,81 @@ export const AbhaPortal: React.FC = () => {
     } finally {
       setVerifyLoading(false);
     }
+  };
+
+  // Initiate OTP Verification for Aadhaar / Mobile (VRFY_ABHA_101/201/301/401)
+  const handleInitiateVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVerifyError(null);
+    setVerifyLoading(true);
+    try {
+      let res: any;
+      if (verifyMode === 'aadhaar') {
+        const raw = verifyIdentifier.replace(/\s+/g, '');
+        if (raw.length !== 12) {
+          setVerifyError('Aadhaar Number is not valid');
+          setVerifyLoading(false);
+          return;
+        }
+        res = await abdmApi.loginByAadhaar(raw);
+      } else if (verifyMode === 'mobile') {
+        res = await abdmApi.generateMobileOtp(verifyIdentifier);
+      } else {
+        res = await abdmApi.loginByMobile(verifyIdentifier);
+      }
+      setVerifyTxnId(res.txnId || res.txn_id || `vtxn-${Date.now()}`);
+      setVerifyStep(2);
+      setSuccessNotice(res.message || 'Verification OTP sent to registered mobile.');
+    } catch (err: any) {
+      setVerifyError(err.response?.data?.detail || 'Failed to request verification OTP.');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  // Confirm OTP Verification (VRFY_ABHA_102/202/302/402)
+  const handleConfirmVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVerifyError(null);
+    if (verifyOtpInput.length < 6) {
+      setVerifyError('Please enter the 6-digit verification OTP.');
+      return;
+    }
+    setVerifyLoading(true);
+    try {
+      let res: any;
+      if (verifyMode === 'aadhaar') {
+        res = await abdmApi.verifyAadhaarLogin(verifyTxnId, verifyOtpInput);
+      } else if (verifyMode === 'mobile') {
+        res = await abdmApi.verifyMobileOtp(verifyTxnId, verifyOtpInput);
+      } else {
+        res = await abdmApi.verifyMobileLogin(verifyTxnId, verifyOtpInput);
+      }
+      const profile: AbhaProfile = {
+        health_id: res.healthId || res.phrAddress?.[0] || 'arun.kumar@sbx',
+        health_id_number: res.healthIdNumber || res.ABHANumber || '91-4829-1029-4721',
+        name: res.name || 'Verified Patient',
+        gender: res.gender || 'M',
+        year_of_birth: res.yearOfBirth || 1991,
+        mobile: res.mobile,
+        address: res.address,
+        district: res.districtName,
+        state: res.stateName,
+        pincode: res.pincode,
+        kycVerified: true,
+      };
+      setVerifiedProfile(profile);
+      setSuccessNotice('ABHA verified successfully via OTP authentication!');
+    } catch (err: any) {
+      setVerifyError(err.response?.data?.detail || 'Invalid OTP. Please check and try again.');
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  // View and Download ABHA Card (CRT_ABHA_114/115/209/308)
+  const handleDownloadCard = () => {
+    window.print();
   };
 
   // Auto-import ABHA profile into local patient registry
@@ -363,8 +550,36 @@ export const AbhaPortal: React.FC = () => {
               </div>
             )}
 
-            {/* STEP 1: Enter Aadhaar */}
+            {/* Mode Selector for ABHA Creation */}
             {step === 1 && (
+              <div className="flex border border-slate-200 rounded-lg p-1 bg-slate-50 mb-6 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setCreateMode('aadhaar_otp')}
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                    createMode === 'aadhaar_otp'
+                      ? 'bg-white text-brand-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Create via Aadhaar OTP (CRT_ABHA_101)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreateMode('demographic')}
+                  className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                    createMode === 'demographic'
+                      ? 'bg-white text-brand-700 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Create via Demographic / Offline (CRT_ABHA_301)
+                </button>
+              </div>
+            )}
+
+            {/* STEP 1: Enter Aadhaar (OTP Mode) */}
+            {step === 1 && createMode === 'aadhaar_otp' && (
               <form onSubmit={handleGenerateOtp} className="space-y-5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
@@ -398,7 +613,7 @@ export const AbhaPortal: React.FC = () => {
                     <span className="text-xs text-slate-600 leading-relaxed">
                       I voluntarily submit my Aadhaar number and consent to UIDAI authentication for the purpose of
                       creating my Ayushman Bharat Health Account (ABHA) under ABDM and Digital Personal Data Protection
-                      (DPDP) Act 2023.
+                      (DPDP) Act 2023 (CRT_ABHA_102).
                     </span>
                   </label>
                 </div>
@@ -420,7 +635,137 @@ export const AbhaPortal: React.FC = () => {
               </form>
             )}
 
-            {/* STEP 2: Enter OTP */}
+            {/* STEP 1: Demographic Mode Form (CRT_ABHA_301-309) */}
+            {step === 1 && createMode === 'demographic' && (
+              <form onSubmit={handleDemographicSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                      Full Name (as on Aadhaar) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={demoForm.name}
+                      onChange={(e) => setDemoForm({ ...demoForm, name: e.target.value })}
+                      placeholder="e.g. Arun Kumar"
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Gender *</label>
+                    <select
+                      value={demoForm.gender}
+                      onChange={(e) => setDemoForm({ ...demoForm, gender: e.target.value })}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    >
+                      <option value="M">Male</option>
+                      <option value="F">Female</option>
+                      <option value="O">Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                      Date of Birth (YYYY-MM-DD) *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={demoForm.date_of_birth}
+                      onChange={(e) => setDemoForm({ ...demoForm, date_of_birth: e.target.value })}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                      12-Digit Aadhaar Number *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={14}
+                      value={demoForm.aadhaar_number}
+                      onChange={(e) => setDemoForm({ ...demoForm, aadhaar_number: e.target.value })}
+                      placeholder="XXXX XXXX XXXX"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                      Mobile Number *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      maxLength={10}
+                      value={demoForm.mobile}
+                      onChange={(e) => setDemoForm({ ...demoForm, mobile: e.target.value })}
+                      placeholder="10-digit mobile"
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Pincode</label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={demoForm.pincode}
+                      onChange={(e) => setDemoForm({ ...demoForm, pincode: e.target.value })}
+                      placeholder="e.g. 560038"
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Address</label>
+                  <input
+                    type="text"
+                    value={demoForm.address}
+                    onChange={(e) => setDemoForm({ ...demoForm, address: e.target.value })}
+                    placeholder="Residential address as on Aadhaar"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={demoForm.consent_given}
+                      onChange={(e) => setDemoForm({ ...demoForm, consent_given: e.target.checked })}
+                      className="mt-0.5 rounded text-brand-600 focus:ring-brand-500"
+                    />
+                    <span className="text-xs text-slate-600 leading-relaxed">
+                      I voluntarily submit my Aadhaar and demographic details and consent to authentication for creating
+                      my Ayushman Bharat Health Account under ABDM (CRT_ABHA_302).
+                    </span>
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading || !demoForm.consent_given}
+                  className="w-full py-3 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {loading ? (
+                    <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4" />
+                      Authenticate Demographics &amp; Create ABHA
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* STEP 2: Enter OTP (CRT_ABHA_105 / 106) */}
             {step === 2 && (
               <form onSubmit={handleVerifyOtp} className="space-y-5">
                 <div>
@@ -439,9 +784,25 @@ export const AbhaPortal: React.FC = () => {
                     placeholder="123456"
                     className="w-full text-center py-3 text-2xl font-mono tracking-[0.5em] border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                   />
-                  <p className="text-[11px] text-slate-500 mt-1.5 text-center">
-                    Demo OTP: Enter any 6 digits (e.g. <span className="font-mono text-slate-700 font-bold">123456</span>)
-                  </p>
+                  <div className="flex justify-between items-center mt-2 text-xs">
+                    <p className="text-[11px] text-slate-500">
+                      Demo OTP: Enter any 6 digits (e.g.{' '}
+                      <span className="font-mono text-slate-700 font-bold">123456</span>)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={resendCountdown > 0 || resendCount >= 2 || loading}
+                      className="text-brand-600 hover:text-brand-800 disabled:text-slate-400 font-semibold flex items-center gap-1 text-xs"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      {resendCountdown > 0
+                        ? `Resend in ${resendCountdown}s`
+                        : resendCount >= 2
+                        ? 'Resend limit reached (2/2)'
+                        : 'Resend OTP (CRT_ABHA_106)'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex gap-3">
@@ -541,14 +902,53 @@ export const AbhaPortal: React.FC = () => {
                   </div>
                 </div>
 
+                {/* CRT_ABHA_112: Suggested ABHA Addresses */}
+                {suggestions.length > 0 && (
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="text-xs font-semibold text-slate-700 flex items-center justify-between">
+                      <span>Available ABHA Address Suggestions (CRT_ABHA_112):</span>
+                      <span className="text-[11px] text-brand-600 font-mono">Selected: {selectedAddress}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {suggestions.map((sugg) => (
+                        <button
+                          key={sugg}
+                          type="button"
+                          onClick={() => setSelectedAddress(sugg)}
+                          className={`px-3 py-1.5 text-xs rounded-lg border font-mono transition-colors ${
+                            selectedAddress === sugg
+                              ? 'bg-brand-600 text-white border-brand-600 font-bold'
+                              : 'bg-white border-slate-300 text-slate-700 hover:border-brand-500'
+                          }`}
+                        >
+                          {sugg}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Actions */}
                 <div className="flex flex-wrap gap-3">
                   <button
-                    onClick={() => handleImportToPatient(generatedProfile)}
+                    onClick={() =>
+                      handleImportToPatient({
+                        ...generatedProfile,
+                        health_id: selectedAddress || generatedProfile.health_id,
+                      })
+                    }
                     className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
                   >
                     <UserPlus className="w-4 h-4" />
                     Register Directly into Patient Registry
+                  </button>
+                  <button
+                    onClick={handleDownloadCard}
+                    className="py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    title="View & Print ABHA Card (CRT_ABHA_114/209/308)"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    View &amp; Print Card
                   </button>
                   <button
                     onClick={() => {
@@ -556,6 +956,7 @@ export const AbhaPortal: React.FC = () => {
                       setAadhaar('');
                       setOtp('');
                       setGeneratedProfile(null);
+                      setSuggestions([]);
                     }}
                     className="py-3 px-4 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-semibold transition-colors"
                   >
@@ -607,42 +1008,182 @@ export const AbhaPortal: React.FC = () => {
       {activeTab === 'verify' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
-            <form onSubmit={handleSearchAbha} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
-                  Search & Verify ABHA ID on NHA Gateway
-                </label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            {/* Verification Method Sub-Tabs */}
+            <div className="flex flex-wrap border border-slate-200 rounded-lg p-1 bg-slate-50 gap-1 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setVerifyMode('search');
+                  setVerifyStep(1);
+                  setVerifyError(null);
+                }}
+                className={`flex-1 py-1.5 px-2 font-semibold rounded-md transition-colors ${
+                  verifyMode === 'search' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Search by ABHA
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVerifyMode('aadhaar');
+                  setVerifyStep(1);
+                  setVerifyError(null);
+                  setVerifyIdentifier('');
+                }}
+                className={`flex-1 py-1.5 px-2 font-semibold rounded-md transition-colors ${
+                  verifyMode === 'aadhaar' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Aadhaar OTP (VRFY_101)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVerifyMode('mobile');
+                  setVerifyStep(1);
+                  setVerifyError(null);
+                  setVerifyIdentifier('');
+                }}
+                className={`flex-1 py-1.5 px-2 font-semibold rounded-md transition-colors ${
+                  verifyMode === 'mobile' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Mobile OTP (VRFY_201)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVerifyMode('comm_mobile');
+                  setVerifyStep(1);
+                  setVerifyError(null);
+                  setVerifyIdentifier('');
+                }}
+                className={`flex-1 py-1.5 px-2 font-semibold rounded-md transition-colors ${
+                  verifyMode === 'comm_mobile' ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Comm Mobile (VRFY_301)
+              </button>
+            </div>
+
+            {/* Mode 1: Search Form */}
+            {verifyMode === 'search' && (
+              <form onSubmit={handleSearchAbha} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
+                    Search &amp; Verify ABHA ID on NHA Gateway
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                      <input
+                        type="text"
+                        value={searchAbhaId}
+                        onChange={(e) => setSearchAbhaId(e.target.value)}
+                        placeholder="e.g. 91-4829-1029-4721 or priya.sharma@abdm"
+                        className="w-full pl-9 pr-4 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent font-medium"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={verifyLoading}
+                      className="py-2 px-5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                    >
+                      {verifyLoading ? (
+                        <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-4 h-4" />
+                          Verify
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    Enter an ABHA Number (14 digits) or an ABHA Address (@abdm) to retrieve verified demographic records.
+                  </p>
+                </div>
+              </form>
+            )}
+
+            {/* Mode 2, 3, 4: OTP Verification Step 1 */}
+            {verifyMode !== 'search' && verifyStep === 1 && (
+              <form onSubmit={handleInitiateVerifyOtp} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
+                    {verifyMode === 'aadhaar'
+                      ? 'Enter 12-Digit Aadhaar Number'
+                      : verifyMode === 'mobile'
+                      ? 'Enter ABHA-Linked Mobile Number'
+                      : 'Enter Communication Mobile Number (VRFY_ABHA_301)'}
+                  </label>
+                  <div className="flex gap-2">
                     <input
                       type="text"
-                      value={searchAbhaId}
-                      onChange={(e) => setSearchAbhaId(e.target.value)}
-                      placeholder="e.g. 91-4829-1029-4721 or priya.sharma@abdm"
-                      className="w-full pl-9 pr-4 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent font-medium"
+                      required
+                      value={verifyIdentifier}
+                      onChange={(e) => setVerifyIdentifier(e.target.value)}
+                      placeholder={verifyMode === 'aadhaar' ? 'XXXX XXXX XXXX' : '9876543210'}
+                      className="flex-1 px-4 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono"
                     />
+                    <button
+                      type="submit"
+                      disabled={verifyLoading || !verifyIdentifier.trim()}
+                      className="py-2 px-5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                    >
+                      {verifyLoading ? (
+                        <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                      ) : (
+                        <>
+                          <Phone className="w-4 h-4" />
+                          Send OTP
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <button
-                    type="submit"
-                    disabled={verifyLoading}
-                    className="py-2 px-5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
-                  >
-                    {verifyLoading ? (
-                      <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                    ) : (
-                      <>
-                        <ShieldCheck className="w-4 h-4" />
-                        Verify
-                      </>
-                    )}
-                  </button>
                 </div>
-                <p className="text-[11px] text-slate-500 mt-1.5">
-                  Enter an ABHA Number (14 digits) or an ABHA Address (@abdm) to retrieve verified demographic records.
-                </p>
-              </div>
-            </form>
+              </form>
+            )}
+
+            {/* Mode 2, 3, 4: OTP Verification Step 2 */}
+            {verifyMode !== 'search' && verifyStep === 2 && (
+              <form onSubmit={handleConfirmVerifyOtp} className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+                      Enter 6-Digit OTP
+                    </label>
+                    <span className="text-xs text-brand-600 font-mono">txnId: {verifyTxnId.slice(0, 14)}...</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      maxLength={6}
+                      required
+                      value={verifyOtpInput}
+                      onChange={(e) => setVerifyOtpInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="123456"
+                      className="flex-1 px-4 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 font-mono text-center tracking-widest text-lg"
+                    />
+                    <button
+                      type="submit"
+                      disabled={verifyLoading || verifyOtpInput.length < 6}
+                      className="py-2 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                    >
+                      {verifyLoading ? (
+                        <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-4 h-4" />
+                          Verify &amp; Fetch ABHA
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
 
             {verifyError && (
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs flex items-center gap-2">

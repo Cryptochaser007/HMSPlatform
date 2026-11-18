@@ -233,3 +233,4 @@ def verify_nha_webhook_signature(
     if provided.startswith("sha256="):
         provided = provided[7:]
     return hmac.compare_digest(expected.lower(), provided.lower())
+

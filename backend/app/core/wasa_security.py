@@ -193,3 +193,4 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             del response.headers["server"]
 
         return response
+

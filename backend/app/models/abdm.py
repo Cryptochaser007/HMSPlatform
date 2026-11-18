@@ -87,3 +87,4 @@ class ABDMTransactionLog(Base):
     masked_summary = Column(JSONB, nullable=False, default=dict)
     error_code = Column(String(100), nullable=True)
     user_id = Column(UUID(as_uuid=False), nullable=True)
+

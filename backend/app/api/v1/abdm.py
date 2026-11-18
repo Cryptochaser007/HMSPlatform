@@ -342,3 +342,256 @@ async def verify_doctor_hpr(
     """Verify doctor credentials against National Healthcare Professional Registry."""
     profile = await hpr_service.verify_doctor(registration_number, council)
     return profile.model_dump()
+
+
+# ─── M1: Resend OTP (CRT_ABHA_106 / VRFY_ABHA_305 / VRFY_ABHA_405) ───────────
+
+
+class ResendOTPRequest(BaseModel):
+    txn_id: str = Field(..., min_length=4, max_length=120)
+    otp_system: str = Field(default="aadhaar", pattern="^(aadhaar|abdm|mobile)$")
+
+
+@router.post(
+    "/abha/resend-otp",
+    summary="CRT_ABHA_106 / VRFY_ABHA_305 / VRFY_ABHA_405 — Resend OTP",
+    dependencies=[Depends(RateLimiter(times=3, seconds=180))],
+)
+async def resend_abha_otp(
+    body: ResendOTPRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        result = await abha_service.resend_otp(
+            txn_id=body.txn_id,
+            otp_system=body.otp_system,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+# ─── M1: Demographic Enrolment (CRT_ABHA_301–309) ────────────────────────────
+
+
+class DemographicEnrolRequest(BaseModel):
+    aadhaar_number: str = Field(..., min_length=12, max_length=16)
+    name: str = Field(..., min_length=2, max_length=120)
+    date_of_birth: str = Field(..., description="YYYY-MM-DD format", pattern=r"^\d{4}-\d{2}-\d{2}$")
+    gender: str = Field(..., pattern="^[MFO]$")
+    mobile: str = Field(..., min_length=10, max_length=15)
+    state_code: Optional[str] = Field(default=None, max_length=10)
+    district_code: Optional[str] = Field(default=None, max_length=10)
+    address: Optional[str] = Field(default=None, max_length=500)
+    pincode: Optional[str] = Field(default=None, max_length=10)
+    consent_given: bool = Field(..., description="CRT_ABHA_302: User consent must be collected before enrolment")
+
+    @field_validator("aadhaar_number")
+    @classmethod
+    def check_aadhaar(cls, v: str) -> str:
+        cleaned = v.replace(" ", "").replace("-", "")
+        if not cleaned.isdigit() or len(cleaned) != 12:
+            raise ValueError("Aadhaar number must be exactly 12 digits")
+        return cleaned
+
+    @field_validator("consent_given")
+    @classmethod
+    def check_consent(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError("CRT_ABHA_302: User consent is mandatory before ABHA enrolment")
+        return v
+
+
+@router.post(
+    "/abha/enrol/demographic",
+    summary="CRT_ABHA_301–309 — Create ABHA via Aadhaar Demographic Authentication",
+    dependencies=[Depends(RateLimiter(times=5, seconds=300))],
+)
+async def enrol_abha_by_demographic(
+    body: DemographicEnrolRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create ABHA via demographic data (name, DOB, gender matched against Aadhaar)."""
+    try:
+        result = await abha_service.enrol_by_demographic(
+            aadhaar_number=body.aadhaar_number,
+            name=body.name,
+            date_of_birth=body.date_of_birth,
+            gender=body.gender,
+            mobile=body.mobile,
+            state_code=body.state_code,
+            district_code=body.district_code,
+            address=body.address,
+            pincode=body.pincode,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+# ─── M1: Communication Mobile Login (VRFY_ABHA_301–305) ──────────────────────
+
+
+class CommunicationMobileLoginRequest(BaseModel):
+    mobile: str = Field(..., min_length=10, max_length=15)
+
+    @field_validator("mobile")
+    @classmethod
+    def check_mobile(cls, v: str) -> str:
+        cleaned = v.replace(" ", "").replace("-", "").replace("+91", "")
+        if not cleaned.isdigit() or len(cleaned) != 10:
+            raise ValueError("Mobile number must be exactly 10 digits")
+        return cleaned
+
+
+@router.post(
+    "/abha/login/mobile",
+    summary="VRFY_ABHA_301 — Fetch ABHA using Communication Mobile OTP",
+    dependencies=[Depends(RateLimiter(times=5, seconds=300))],
+)
+async def login_abha_by_mobile(
+    body: CommunicationMobileLoginRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """VRFY_ABHA_301: Request OTP for ABHA retrieval using communication mobile number."""
+    try:
+        result = await abha_service.login_by_communication_mobile(
+            mobile=body.mobile,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+@router.post(
+    "/abha/login/mobile/verify",
+    summary="VRFY_ABHA_302–304 — Verify Mobile OTP and retrieve ABHA list",
+    dependencies=[Depends(RateLimiter(times=5, seconds=300))],
+)
+async def verify_abha_mobile_login(
+    body: VerifyOTPRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """VRFY_ABHA_302–304: Verify OTP and get list of ABHA Numbers linked to mobile."""
+    try:
+        result = await abha_service.verify_communication_mobile_otp(
+            txn_id=body.txn_id,
+            otp=body.otp,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+# ─── M1: Aadhaar Login OTP (VRFY_ABHA_101/401) ───────────────────────────────
+
+
+@router.post(
+    "/abha/login/aadhaar",
+    summary="VRFY_ABHA_101/401 — Initiate ABHA Verification via Aadhaar OTP",
+    dependencies=[Depends(RateLimiter(times=5, seconds=300))],
+)
+async def login_abha_by_aadhaar(
+    body: AadhaarOTPRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """VRFY_ABHA_101/401: Request Aadhaar OTP for ABHA number verification/retrieval."""
+    try:
+        result = await abha_service.login_by_aadhaar_otp(
+            aadhaar_number=body.aadhaar_number,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+@router.post(
+    "/abha/login/aadhaar/verify",
+    summary="VRFY_ABHA_101/401 — Verify Aadhaar OTP for ABHA login",
+    dependencies=[Depends(RateLimiter(times=5, seconds=300))],
+)
+async def verify_abha_aadhaar_login(
+    body: VerifyOTPRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """VRFY_ABHA_101/401: Verify Aadhaar OTP and retrieve ABHA profile."""
+    try:
+        result = await abha_service.verify_aadhaar_login_otp(
+            txn_id=body.txn_id,
+            otp=body.otp,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+# ─── M1: ABHA Card & QR (CRT_ABHA_114/209/308) ───────────────────────────────
+
+
+class AbhaCardRequest(BaseModel):
+    abha_token: str = Field(
+        ...,
+        min_length=4,
+        max_length=1024,
+        description="X-Token from ABHA enrolment/login response",
+    )
+
+
+@router.post("/abha/card", summary="CRT_ABHA_114/209/308 — Fetch ABHA Card (image + demographics)")
+async def get_abha_card_data(
+    body: AbhaCardRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """CRT_ABHA_114: Returns ABHA card with ABHA number, name, DOB, gender, QR code."""
+    try:
+        result = await abha_service.get_abha_card(
+            abha_token=body.abha_token,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+@router.post("/abha/qr", summary="CRT_ABHA_114 — Fetch ABHA QR Code")
+async def get_abha_qr_code(
+    body: AbhaCardRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """CRT_ABHA_114: Returns ABHA QR code for printing on registration counter."""
+    try:
+        result = await abha_service.get_abha_qr(
+            abha_token=body.abha_token,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+# ─── M1: ABHA Address Suggestions (CRT_ABHA_112) ─────────────────────────────
+
+
+@router.get(
+    "/abha/suggestions",
+    summary="CRT_ABHA_112 — Get ABHA Address Suggestions (3+ options)",
+)
+async def get_abha_address_suggestions(
+    txn_id: str = Query(..., min_length=4, max_length=120),
+    current_user: dict = Depends(get_current_user),
+):
+    """CRT_ABHA_112: Returns at least 3 available ABHA address suggestions for user selection."""
+    try:
+        result = await abha_service.get_abha_address_suggestions(
+            txn_id=txn_id,
+            user_id=str(current_user.get("id")),
+        )
+        return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc

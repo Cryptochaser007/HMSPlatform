@@ -67,6 +67,20 @@ ABDM_ENDPOINTS: dict[str, str] = {
     "abha_address_search": "/phr/web/login/abha/search",
     "abha_profile": "/profile/account",
     "abha_search": "/phr/web/login/abha/search",
+    # M1: RSA Public Certificate (for Aadhaar/OTP encryption in SANDBOX mode)
+    "abha_public_cert": "/profile/public/certificate",
+    # M1: ABHA Card & QR Code
+    "abha_card": "/profile/account/abha-card",
+    "abha_qr": "/profile/account/qrCode",
+    # M1: ABHA Address Suggestions (CRT_ABHA_112)
+    "abha_address_suggestions": "/enrollment/enrol/suggestions",
+    # M1: Resend OTP (CRT_ABHA_106 / VRFY_ABHA_305 / VRFY_ABHA_405)
+    "abha_resend_otp": "/enrollment/request/otp",
+    # M1: Demographic Enrolment (CRT_ABHA_301-309)
+    "abha_demographic_enrol": "/enrollment/enrol/byAadhaar",
+    # M1: Login endpoints (VRFY_ABHA_101-405)
+    "abha_login_request_otp": "/profile/login/request/otp",
+    "abha_login_verify_otp": "/profile/login/verify",
     # M1: Scan & Share (HIP Counter Check-in)
     "patient_share_on_share": "/gateway/v3/hip/patient-share/on-share",
     # HPR / HFR

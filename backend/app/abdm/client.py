@@ -131,6 +131,72 @@ class MockABDMAdapter(BaseABDMAdapter):
         headers = headers or {}
         req_id = request_id or str(uuid.uuid4())
 
+        # 0. M1: NHA RSA Public Certificate (SANDBOX/PRODUCTION mode)
+        if "public/certificate" in endpoint:
+            return 200, {
+                "publicKey": (
+                    "-----BEGIN PUBLIC KEY-----\n"
+                    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2a2rwplBQLzHPZe5TNJG\n"
+                    "nI8M2PkFPNTa4WOEaOFOmRDMBQ7t3MRB3bFj29Ew8RxF5OgQG2Mg7kAhkKkD1+m\n"
+                    "mock_key_data_for_testing_only_not_real_nha_key_do_not_use_production\n"
+                    "-----END PUBLIC KEY-----"
+                ),
+                "abdm_mode": "MOCK",
+            }
+
+        # 0b. M1: ABHA Address Suggestions (CRT_ABHA_112)
+        if "suggestions" in endpoint:
+            cm_id = self.settings.x_cm_id
+            return 200, {
+                "txnId": data.get("txnId", "mock-txn"),
+                "abhaAddressList": [
+                    f"arun.kumar@{cm_id}",
+                    f"arun.kumar99@{cm_id}",
+                    f"arunkumar1991@{cm_id}",
+                    f"arun.k.1991@{cm_id}",
+                ],
+                "abdm_mode": "MOCK",
+            }
+
+        # 0c. M1: ABHA Card (CRT_ABHA_114/209/308)
+        if "abha-card" in endpoint or "abha_card" in endpoint:
+            import base64 as _b64
+            svg = (
+                b'<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200">'
+                b'<rect width="400" height="200" fill="#1a73e8"/>'
+                b'<text x="20" y="40" fill="white" font-size="16">ABHA Card</text>'
+                b'<text x="20" y="70" fill="white" font-size="12">91-4829-1029-4721</text>'
+                b'<text x="20" y="95" fill="white" font-size="12">Arun Kumar | M | 1991</text>'
+                b'<text x="20" y="120" fill="#ffeb3b" font-size="10">Sandbox Simulation</text>'
+                b'</svg>'
+            )
+            return 200, {
+                "cardImage": _b64.b64encode(svg).decode(),
+                "mimeType": "image/svg+xml",
+                "ABHANumber": "91-4829-1029-4721",
+                "name": "Arun Kumar",
+                "gender": "M",
+                "yearOfBirth": 1991,
+                "abdm_mode": "MOCK",
+            }
+
+        # 0d. M1: ABHA QR Code (CRT_ABHA_114)
+        if "qrCode" in endpoint or "qr" in endpoint.lower():
+            import base64 as _b64, json as _json
+            qr_data = _json.dumps({
+                "hidn": "91-4829-1029-4721",
+                "hid": f"arun.kumar@{self.settings.x_cm_id}",
+                "name": "Arun Kumar",
+                "gender": "M",
+                "dob": "1991-05-14",
+                "address": "Bengaluru Urban, Karnataka",
+            })
+            return 200, {
+                "qrData": _b64.b64encode(qr_data.encode()).decode(),
+                "qrString": qr_data,
+                "abdm_mode": "MOCK",
+            }
+
         # 1. M1: Aadhaar OTP Request (v3)
         if "request/otp" in endpoint or "aadhaar/generateOtp" in endpoint:
             raw_id = str(data.get("loginId") or data.get("aadhaar") or "999988887777")
@@ -147,8 +213,71 @@ class MockABDMAdapter(BaseABDMAdapter):
                 "abdm_mode": "MOCK",
             }
 
-        # 2. M1: Aadhaar / Mobile OTP Verify & Enrol (v3)
-        if "enrol/byAadhaar" in endpoint or "aadhaar/verifyOtp" in endpoint or "login/verify" in endpoint:
+        # 2a. M1: Demographic Enrolment (CRT_ABHA_301-309)
+        if "enrol/byAadhaar" in endpoint:
+            auth_data = data.get("authData", {})
+            if "demographics" in auth_data.get("authMethods", []):
+                demo = auth_data.get("demographics", {})
+                name = demo.get("name", "Demo Patient")
+                gender = demo.get("gender", "M")
+                dob = demo.get("dateOfBirth", "1990-01-01")
+                txn_id = data.get("txnId") or f"abdm-demo-txn-{uuid.uuid4().hex[:10]}"
+                cm_id = self.settings.x_cm_id
+                return 200, {
+                    "txnId": txn_id,
+                    "token": f"mock-abdm-v3-phr-token-{req_id[:8]}",
+                    "ABHANumber": "91-4829-1029-4721",
+                    "healthIdNumber": "91-4829-1029-4721",
+                    "phrAddress": [f"demo.patient@{cm_id}"],
+                    "healthId": f"demo.patient@{cm_id}",
+                    "name": name,
+                    "gender": gender,
+                    "dateOfBirth": dob,
+                    "mobile": demo.get("mobile", "9876543210"),
+                    "address": demo.get("address", "Demo Address"),
+                    "districtName": "Bengaluru Urban",
+                    "stateName": "Karnataka",
+                    "pincode": demo.get("pincode", "560038"),
+                    "kycVerified": True,
+                    "kycStatus": "VERIFIED",
+                    "isNew": True,
+                    "message": "ABHA created via demographic auth (Sandbox simulation)",
+                    "abdm_mode": "MOCK",
+                }
+
+        # 2b. M1: Login OTP Verify (VRFY_ABHA_101/301/401 — returns ABHA list)
+        if "login/verify" in endpoint:
+            txn_id = data.get("txnId") or f"abdm-v3-login-txn-{uuid.uuid4().hex[:10]}"
+            cm_id = self.settings.x_cm_id
+            return 200, {
+                "txnId": txn_id,
+                "token": f"mock-abdm-v3-login-token-{req_id[:8]}",
+                "ABHANumber": "91-4829-1029-4721",
+                "healthIdNumber": "91-4829-1029-4721",
+                "phrAddress": [f"arun.kumar@{cm_id}"],
+                "healthId": f"arun.kumar@{cm_id}",
+                "accounts": [
+                    {
+                        "ABHANumber": "91-4829-1029-4721",
+                        "phrAddress": [f"arun.kumar@{cm_id}"],
+                        "name": "Arun Kumar",
+                        "gender": "M",
+                        "yearOfBirth": 1991,
+                        "mobile": "98XXXXX210",
+                        "status": "ACTIVE",
+                    }
+                ],
+                "name": "Arun Kumar",
+                "gender": "M",
+                "yearOfBirth": 1991,
+                "kycVerified": True,
+                "kycStatus": "VERIFIED",
+                "message": "ABHA verified successfully (Sandbox simulation)",
+                "abdm_mode": "MOCK",
+            }
+
+        # 2c. M1: Aadhaar / Mobile OTP Verify & Enrol (v3)
+        if "enrol/byAadhaar" in endpoint or "aadhaar/verifyOtp" in endpoint:
             txn_id = data.get("txnId") or f"abdm-v3-txn-{uuid.uuid4().hex[:10]}"
             return 200, {
                 "txnId": txn_id,

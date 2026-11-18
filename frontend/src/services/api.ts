@@ -183,6 +183,56 @@ export const abdmApi = {
     const res = await api.get(`/abdm/hiu/records/${encodeURIComponent(patient_abha)}`);
     return res.data;
   },
+  resendOtp: async (
+    txn_id: string,
+    otp_system: string = 'aadhaar'
+  ): Promise<{ txnId?: string; message?: string }> => {
+    const res = await api.post('/abdm/abha/resend-otp', { txn_id, otp_system });
+    return res.data;
+  },
+  enrolByDemographic: async (data: {
+    aadhaar_number: string;
+    name: string;
+    date_of_birth: string;
+    gender: string;
+    mobile: string;
+    consent_given: boolean;
+    state_code?: string;
+    district_code?: string;
+    address?: string;
+    pincode?: string;
+  }): Promise<any> => {
+    const res = await api.post('/abdm/abha/enrol/demographic', data);
+    return res.data;
+  },
+  loginByMobile: async (mobile: string): Promise<{ txnId?: string; message?: string }> => {
+    const res = await api.post('/abdm/abha/login/mobile', { mobile });
+    return res.data;
+  },
+  verifyMobileLogin: async (txn_id: string, otp: string): Promise<any> => {
+    const res = await api.post('/abdm/abha/login/mobile/verify', { txn_id, otp });
+    return res.data;
+  },
+  loginByAadhaar: async (aadhaar_number: string): Promise<{ txnId?: string; message?: string }> => {
+    const res = await api.post('/abdm/abha/login/aadhaar', { aadhaar_number });
+    return res.data;
+  },
+  verifyAadhaarLogin: async (txn_id: string, otp: string): Promise<any> => {
+    const res = await api.post('/abdm/abha/login/aadhaar/verify', { txn_id, otp });
+    return res.data;
+  },
+  getAbhaCard: async (abha_token: string): Promise<any> => {
+    const res = await api.post('/abdm/abha/card', { abha_token });
+    return res.data;
+  },
+  getAbhaQr: async (abha_token: string): Promise<any> => {
+    const res = await api.post('/abdm/abha/qr', { abha_token });
+    return res.data;
+  },
+  getAddressSuggestions: async (txn_id: string): Promise<{ txnId: string; abhaAddressList: string[] }> => {
+    const res = await api.get('/abdm/abha/suggestions', { params: { txn_id } });
+    return res.data;
+  },
 };
 
 export const wardsApi = {

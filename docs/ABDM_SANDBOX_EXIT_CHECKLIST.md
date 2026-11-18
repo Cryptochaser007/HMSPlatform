@@ -170,3 +170,4 @@ curl -X POST https://<your-host>/api/v1/abdm/hiu/consent/request \
     "hi_types": ["OPConsultation", "Prescription", "DiagnosticReport", "DischargeSummary"]
   }'
 ```
+

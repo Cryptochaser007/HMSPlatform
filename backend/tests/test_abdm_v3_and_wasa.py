@@ -141,3 +141,4 @@ def test_wasa_security_headers_and_abdm_status():
     assert "max-age=63072000" in res.headers["strict-transport-security"]
     assert "no-store" in res.headers["cache-control"]
     assert "content-security-policy" in res.headers
+

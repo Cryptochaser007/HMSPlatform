@@ -145,3 +145,4 @@ CREATE TRIGGER trg_abdm_txn_logs_no_update
     FOR EACH ROW EXECUTE FUNCTION prevent_abdm_txn_log_mutation();
 
 COMMIT;
+
