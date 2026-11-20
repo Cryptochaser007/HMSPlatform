@@ -1,6 +1,7 @@
 """Authentication, JWT tokens, and User lifecycle endpoints."""
 
 from typing import Any, Dict
+from datetime import datetime, timezone
 
 import secrets
 import hmac
@@ -19,6 +20,16 @@ from app.services.auth_service import auth_service
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+async def _activate_single_session(user_id: str, access_token: str) -> str:
+    """Store the current session ID with a 15-minute idle sliding window."""
+    from app.core.redis_state import get_redis
+    payload = decode_token(access_token)
+    sid = str(payload["sid"])
+    redis_client = await get_redis()
+    await redis_client.set(f"auth:session:{user_id}", sid, ex=900)
+    return sid
+
+
 @router.post(
     "/login",
     dependencies=[Depends(RateLimiter(times=10, seconds=60))],
@@ -28,10 +39,11 @@ async def login(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, bool]:
+) -> Dict[str, Any]:
     """Authenticate user with email and password, returning JWT access and refresh tokens."""
     user = await auth_service.authenticate_user(db, credentials.email, credentials.password)
     tokens = auth_service.create_tokens(user)
+    await _activate_single_session(str(user.id), tokens.access_token)
 
     # Log successful login to immutable audit trail
     logger = await get_audit_logger()
@@ -45,10 +57,20 @@ async def login(
         user_agent=request.headers.get("user-agent"),
     )
     secure = request.url.scheme == "https" or get_settings().ENVIRONMENT.lower() == "production"
-    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=1800, path="/")
+    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=900, path="/")
     response.set_cookie("refresh_token", tokens.refresh_token, httponly=True, secure=secure, samesite="strict", max_age=604800, path="/api/v1/auth")
     response.set_cookie("csrf_token", secrets.token_urlsafe(32), httponly=False, secure=secure, samesite="strict", max_age=604800, path="/")
-    return {"authenticated": True}
+    from app.core.redis_state import get_redis
+    failed_epoch = await (await get_redis()).get(f"auth:lockout:{credentials.email.strip().lower()}:last_failed")
+    from sqlalchemy import text
+    durable_failed = await db.execute(text("SELECT last_failed_login FROM users WHERE id=:uid"), {"uid": str(user.id)})
+    last_failed = durable_failed.scalar_one_or_none()
+    previous_login = getattr(user, "_previous_last_login", None)
+    return {
+        "authenticated": True,
+        "last_successful_login": previous_login.isoformat() if previous_login else None,
+        "last_failed_login": last_failed.isoformat() if last_failed else (datetime.fromtimestamp(int(failed_epoch), timezone.utc).isoformat() if failed_epoch else None),
+    }
 
 
 @router.post(
@@ -68,9 +90,22 @@ async def refresh_token(
     csrf_header = request.headers.get("X-CSRF-Token", "")
     if not csrf_cookie or not hmac.compare_digest(csrf_cookie, csrf_header):
         raise HTTPException(status_code=403, detail="CSRF validation failed")
+    try:
+        refresh_claims = decode_token(token)
+        from app.core.redis_state import get_redis
+        sessions = await get_redis()
+        active_sid = await sessions.get(f"auth:session:{refresh_claims.get('sub')}")
+        if not refresh_claims.get("sid") or not active_sid or not hmac.compare_digest(str(active_sid), str(refresh_claims["sid"])):
+            raise HTTPException(status_code=401, detail="Refresh session expired or replaced")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid refresh session") from exc
     tokens = await auth_service.refresh_access_token(db, token)
+    decoded = decode_token(tokens.access_token)
+    await _activate_single_session(str(decoded["sub"]), tokens.access_token)
     secure = request.url.scheme == "https" or get_settings().ENVIRONMENT.lower() == "production"
-    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=1800, path="/")
+    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=900, path="/")
     response.set_cookie("refresh_token", tokens.refresh_token, httponly=True, secure=secure, samesite="strict", max_age=604800, path="/api/v1/auth")
     response.set_cookie("csrf_token", secrets.token_urlsafe(32), httponly=False, secure=secure, samesite="strict", max_age=604800, path="/")
     return {"authenticated": True}
@@ -87,6 +122,8 @@ async def logout(
     jti = current_user.get("jti")
     if jti:
         await auth_service.blacklist_token(jti)
+    from app.core.redis_state import get_redis
+    await (await get_redis()).delete(f"auth:session:{current_user['user_id']}")
     refresh = request.cookies.get("refresh_token")
     if refresh:
         try:

@@ -603,6 +603,12 @@ export const AbhaPortal: React.FC = () => {
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                  <div className="text-xs font-semibold text-slate-800">Privacy notice for ABHA enrolment</div>
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
+                    Your Aadhaar number is used only to request UIDAI authentication and create or verify your ABHA.
+                    The hospital records the authentication transaction metadata for security and audit, and does not
+                    store the raw Aadhaar number or OTP in its audit log. You may stop before submitting the OTP.
+                  </p>
                   <label className="flex items-start gap-2.5 cursor-pointer">
                     <input
                       type="checkbox"
@@ -611,9 +617,8 @@ export const AbhaPortal: React.FC = () => {
                       className="mt-0.5 rounded text-brand-600 focus:ring-brand-500"
                     />
                     <span className="text-xs text-slate-600 leading-relaxed">
-                      I voluntarily submit my Aadhaar number and consent to UIDAI authentication for the purpose of
-                      creating my Ayushman Bharat Health Account (ABHA) under ABDM and Digital Personal Data Protection
-                      (DPDP) Act 2023 (CRT_ABHA_102).
+                      I have read this privacy notice and voluntarily consent to UIDAI Aadhaar authentication for
+                      creating my Ayushman Bharat Health Account (ABHA) under ABDM (CRT_ABHA_102).
                     </span>
                   </label>
                 </div>
@@ -734,6 +739,11 @@ export const AbhaPortal: React.FC = () => {
                 </div>
 
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="text-xs font-semibold text-slate-800 mb-1">Privacy notice for ABHA enrolment</div>
+                  <p className="text-[11px] text-slate-600 leading-relaxed mb-2">
+                    Aadhaar and demographic details are sent for UIDAI authentication and ABHA creation. The hospital
+                    keeps transaction metadata for audit, not raw Aadhaar, PID data, or OTP values.
+                  </p>
                   <label className="flex items-start gap-2.5 cursor-pointer">
                     <input
                       type="checkbox"
@@ -742,8 +752,8 @@ export const AbhaPortal: React.FC = () => {
                       className="mt-0.5 rounded text-brand-600 focus:ring-brand-500"
                     />
                     <span className="text-xs text-slate-600 leading-relaxed">
-                      I voluntarily submit my Aadhaar and demographic details and consent to authentication for creating
-                      my Ayushman Bharat Health Account under ABDM (CRT_ABHA_302).
+                      I have read this privacy notice and voluntarily consent to UIDAI authentication for creating my
+                      Ayushman Bharat Health Account under ABDM (CRT_ABHA_302).
                     </span>
                   </label>
                 </div>

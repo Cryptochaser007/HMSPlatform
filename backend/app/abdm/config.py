@@ -45,9 +45,9 @@ ABDM_ABHA_URLS: dict[ABDMMode, str] = {
 }
 
 ABDM_TOKEN_PATHS: dict[ABDMMode, str] = {
-    ABDMMode.MOCK: "/gateway/v0.5/sessions",
-    ABDMMode.SANDBOX: "/gateway/v0.5/sessions",
-    ABDMMode.PRODUCTION: "/gateway/v0.5/sessions",
+    ABDMMode.MOCK: "/api/hiecm/gateway/v3/sessions",
+    ABDMMode.SANDBOX: "/api/hiecm/gateway/v3/sessions",
+    ABDMMode.PRODUCTION: "/api/hiecm/gateway/v3/sessions",
 }
 
 # ---------------------------------------------------------------------------
@@ -57,6 +57,7 @@ ABDM_ENDPOINTS: dict[str, str] = {
     # Sessions (OAuth 2.0)
     "sessions_v05": "/gateway/v0.5/sessions",
     "sessions_v3": "/api/hiecm/gateway/v3/sessions",
+    "gateway_certs": "/api/hiecm/gateway/v3/certs",
     # M1: ABHA v3 Creation & Verification (relative to ABDM_ABHA_URL)
     "abha_aadhaar_generate_otp": "/enrollment/request/otp",
     "abha_aadhaar_verify_otp": "/enrollment/enrol/byAadhaar",
@@ -73,7 +74,8 @@ ABDM_ENDPOINTS: dict[str, str] = {
     "abha_card": "/profile/account/abha-card",
     "abha_qr": "/profile/account/qrCode",
     # M1: ABHA Address Suggestions (CRT_ABHA_112)
-    "abha_address_suggestions": "/enrollment/enrol/suggestions",
+    "abha_address_suggestions": "/enrollment/enrol/suggestion",
+    "abha_address_enrol": "/enrollment/enrol/abha-address",
     # M1: Resend OTP (CRT_ABHA_106 / VRFY_ABHA_305 / VRFY_ABHA_405)
     "abha_resend_otp": "/enrollment/request/otp",
     # M1: Demographic Enrolment (CRT_ABHA_301-309)
@@ -90,19 +92,21 @@ ABDM_ENDPOINTS: dict[str, str] = {
     "hfr_profile": "/gateway/v1/facility/{facility_id}",
     "hfr_update": "/gateway/v1/facility/{facility_id}",
     # M2: HIP Discovery & Linking (HIP -> Gateway)
-    "on_discover": "/gateway/v0.5/care-contexts/on-discover",
-    "on_link_init": "/gateway/v0.5/links/link/on-init",
-    "on_link_confirm": "/gateway/v0.5/links/link/on-confirm",
-    "hip_link_add_contexts": "/gateway/v0.5/links/context/add",
-    "hip_consent_on_notify": "/gateway/v0.5/consents/hip/on-notify",
-    "hip_hi_on_request": "/gateway/v0.5/health-information/hip/on-request",
-    "hi_notify": "/gateway/v0.5/health-information/notify",
+    "hip_generate_link_token": "/api/hiecm/v3/token/generate-token",
+    "hip_link_add_contexts": "/api/hiecm/hip/v3/link/carecontext",
+    "on_discover": "/api/hiecm/user-initiated-linking/v3/patient/care-context/on-discover",
+    "on_link_init": "/api/hiecm/user-initiated-linking/v3/link/care-context/on-init",
+    "on_link_confirm": "/api/hiecm/user-initiated-linking/v3/link/care-context/on-confirm",
+    "hip_consent_on_notify": "/api/hiecm/consent/v3/request/hip/on-notify",
+    "hip_hi_on_request": "/api/hiecm/data-flow/v3/health-information/hip/on-request",
+    "hi_notify": "/api/hiecm/data-flow/v3/health-information/notify",
     # M3: HIU Consent Manager & Health Information Exchange
-    "consent_request_init": "/gateway/v0.5/consent-requests/init",
-    "consent_fetch": "/gateway/v0.5/consent-requests/{consent_id}",
-    "hi_request": "/gateway/v0.5/health-information/cm/request",
-    "hi_transfer": "/gateway/v0.5/health-information/transfer",
-    "on_notify": "/gateway/v0.5/consents/hip/on-notify",
+    "consent_request_init": "/api/hiecm/consent/v3/request/init",
+    "consent_request_hiu_notify": "/api/hiecm/consent/v3/request/hiu/on-notify",
+    "consent_fetch": "/api/hiecm/consent/v3/fetch",
+    "hi_request": "/api/hiecm/data-flow/v3/health-information/request",
+    "hi_transfer": "/api/hiecm/data-flow/v3/health-information/transfer",
+    "on_notify": "/api/hiecm/consent/v3/request/hiu/on-notify",
 }
 
 # ---------------------------------------------------------------------------
@@ -190,6 +194,10 @@ class ABDMSettings(BaseSettings):
         default="",
         description="Shared secret / key for verifying NHA webhook signatures",
     )
+    abdm_gateway_allowed_ips: str = Field(
+        default="13.203.243.253,13.203.245.166,65.0.113.207",
+        description="Comma-separated NHA gateway callback source IP allowlist",
+    )
     abdm_request_timeout: int = Field(default=30, ge=5, le=120)
 
     @field_validator("abdm_env", mode="before")
@@ -256,14 +264,16 @@ class ABDMSettings(BaseSettings):
     def callback_urls(self) -> dict[str, str]:
         base = self.callback_base_url
         return {
-            "patient_share": f"{base}/api/v1/abdm/v3/hip/patient-share",
-            "discover": f"{base}/api/v1/abdm/v0.5/care-contexts/discover",
-            "link_init": f"{base}/api/v1/abdm/v0.5/links/link/init",
-            "link_confirm": f"{base}/api/v1/abdm/v0.5/links/link/confirm",
-            "hip_consent_notify": f"{base}/api/v1/abdm/v0.5/consents/hip/notify",
-            "hip_hi_request": f"{base}/api/v1/abdm/v0.5/health-information/hip/request",
-            "hiu_consent_notify": f"{base}/api/v1/abdm/v0.5/consents/hiu/notify",
-            "hi_transfer": f"{base}/api/v1/abdm/v0.5/health-information/transfer",
+            "patient_share": f"{base}/api/v3/hip/patient-share",
+            "discover": f"{base}/api/v3/hip/patient/care-context/discover",
+            "link_init": f"{base}/api/v3/hip/link/care-context/init",
+            "link_confirm": f"{base}/api/v3/hip/link/care-context/confirm",
+            "token_on_generate": f"{base}/api/v3/hip/token/on-generate-token",
+            "link_on_carecontext": f"{base}/api/v3/link/on_carecontext",
+            "hip_consent_notify": f"{base}/api/v3/consent/request/hip/notify",
+            "hip_hi_request": f"{base}/api/v3/hip/health-information/request",
+            "hiu_consent_notify": f"{base}/api/v3/hiu/consent/request/notify",
+            "hi_transfer": f"{base}/api/v3/health-information/transfer",
         }
 
     def get_endpoint(self, key: str, **path_params: str) -> str:

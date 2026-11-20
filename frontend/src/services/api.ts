@@ -30,8 +30,21 @@ const api = axios.create({
 // Response Interceptor: Catch 401 and redirect to Login
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401 && !window.location.pathname.includes('/login')) {
+  async (error) => {
+    const originalRequest = error.config as (typeof error.config & { _sessionRetry?: boolean }) | undefined;
+    const authPath = String(originalRequest?.url || '');
+    if (error.response?.status === 401 && originalRequest && !originalRequest._sessionRetry
+        && !authPath.includes('/auth/login') && !authPath.includes('/auth/refresh')
+        && !authPath.includes('/auth/signup')) {
+      originalRequest._sessionRetry = true;
+      try {
+        // Refresh uses the HttpOnly refresh cookie and XSRF double-submit header.
+        await api.post('/auth/refresh');
+        return api.request(originalRequest);
+      } catch {
+        if (!window.location.pathname.includes('/login')) window.location.href = '/login';
+      }
+    } else if (error.response?.status === 401 && !window.location.pathname.includes('/login')) {
       window.location.href = '/login';
     }
     return Promise.reject(error);

@@ -51,12 +51,17 @@ logger = logging.getLogger("abdm.hiu")
 # Ephemeral keypair store (transaction_id -> (FideliusKeyPair, patient_abha))
 # Decrypted longitudinal timeline is intentionally request-local only in this demo.
 _longitudinal_records: Dict[str, List[Dict[str, Any]]] = {}
+PURPOSES = {
+    "CAREMGT": "Care Management", "BTG": "Break the Glass", "PUBHLTH": "Public Health",
+    "HPAYMT": "Healthcare Payment", "DSRCH": "Disease Surveillance", "PATRQT": "Patient Request",
+}
 
 
 class ConsentRequest(BaseModel):
     patient_abha: str = Field(..., min_length=4, max_length=255)
     purpose: str = Field(default="Care Management", max_length=200)
     purpose_code: str = Field(default="CAREMGT", max_length=30)
+    purpose_ref_uri: Optional[str] = Field(default=None, max_length=500)
     date_from: datetime
     date_to: datetime
     hi_types: List[str] = Field(
@@ -108,13 +113,19 @@ class HIUService:
         now = datetime.now(timezone.utc)
         erase_at = now + timedelta(days=30)
 
+        purpose_code = request.purpose_code.upper()
+        purpose_text = PURPOSES.get(purpose_code)
+        if not purpose_text:
+            raise ABDMError("Unsupported consent purpose code", "ABDM-CONSENT-PURPOSE", 422)
+        purpose_ref_uri = request.purpose_ref_uri or f"{self.settings.callback_base_url}/consent-purposes/{purpose_code}"
         payload = {
             "requestId": request_id,
             "timestamp": utc_timestamp_iso(),
             "consent": {
                 "purpose": {
-                    "text": request.purpose,
-                    "code": request.purpose_code,
+                    "text": purpose_text,
+                    "code": purpose_code,
+                    "refUri": purpose_ref_uri,
                 },
                 "patient": {"id": request.patient_abha},
                 "hiu": {"id": self.settings.hiu_id},
@@ -156,8 +167,8 @@ class HIUService:
             "consent_request_id": request_id,
             "role": "HIU",
             "patient_abha": request.patient_abha,
-            "purpose_code": request.purpose_code,
-            "purpose_text": request.purpose,
+            "purpose_code": purpose_code,
+            "purpose_text": purpose_text,
             "status": initial_status,
             "hi_types": request.hi_types,
             "date_from": request.date_from.isoformat(),
@@ -168,6 +179,7 @@ class HIUService:
             "abdm_mode": self.client.mode.value,
             "created_at": now.isoformat(),
         }
+        row = None
         try:
             from app.models.abdm import ABDMConsentArtefact
 
@@ -177,8 +189,8 @@ class HIUService:
                     consent_request_id=request_id,
                     role="HIU",
                     patient_abha=request.patient_abha,
-                    purpose_code=request.purpose_code,
-                    purpose_text=request.purpose,
+                    purpose_code=purpose_code,
+                    purpose_text=purpose_text,
                     status=initial_status,
                     hi_types=request.hi_types,
                     date_from=request.date_from,
@@ -249,6 +261,7 @@ class HIUService:
         artefact_ids = [a.get("id") for a in artefacts if isinstance(a, dict) and a.get("id")]
         primary_id = artefact_ids[0] if artefact_ids else consent_req_id
 
+        row = None
         try:
             from app.models.abdm import ABDMConsentArtefact
 
@@ -264,15 +277,42 @@ class HIUService:
                 if primary_id:
                     row.consent_id = primary_id
                 row.signature_verified = is_verified
+                row.signature = str(artefacts[0].get("signature") or "") if artefacts and isinstance(artefacts[0], dict) else None
+                row.artefact_payload = {"notification": notification, "signed_artefacts": artefacts}
                 await db.flush()
         except Exception as exc:
             logger.debug("HIU consent notify DB update fallback: %s", exc)
+
+        gateway_ack = None
+        fetched = None
+        if self.client.mode != ABDMMode.MOCK:
+            gateway_ack = await self.client._make_request(
+                method="POST", endpoint=ABDM_ENDPOINTS["consent_request_hiu_notify"],
+                data={"requestId": str(uuid.uuid4()), "timestamp": utc_timestamp_iso(),
+                      "acknowledgement": {"status": "OK", "consentRequestId": consent_req_id}},
+                correlation_id=consent_req_id,
+            )
+            if artefact_ids:
+                fetched = await self.client._make_request(
+                    method="POST", endpoint=ABDM_ENDPOINTS["consent_fetch"],
+                    data={"requestId": str(uuid.uuid4()), "timestamp": utc_timestamp_iso(),
+                          "consentRequestId": consent_req_id, "consentArtefactIds": artefact_ids},
+                    correlation_id=consent_req_id,
+                )
+                try:
+                    if row:
+                        row.artefact_payload = {"notification": notification, "signed_artefacts": artefacts, "fetch_response": fetched}
+                        await db.flush()
+                except Exception:
+                    logger.exception("Failed to persist fetched signed consent artefacts")
 
         return {
             "status": "ACK",
             "consent_request_id": consent_req_id,
             "consent_status": consent_status,
             "artefact_ids": artefact_ids,
+            "gateway_ack": gateway_ack,
+            "fetch_response": fetched,
         }
 
     # ------------------------------------------------------------------
@@ -305,8 +345,11 @@ class HIUService:
         txn_id = str(uuid.uuid4())
         from app.core.encryption import encrypt_field
         from app.core.redis_state import get_redis
+        redis_client = await get_redis()
+        if self.client.mode != ABDMMode.MOCK and redis_client.__class__.__name__ == "InMemoryRedisFallback":
+            raise ABDMError("Redis is required for secure HIU key storage", "ABDM-REDIS", 503)
         key_record = {"private_key_b64": hiu_keypair.private_key_b64, "public_key_b64": hiu_keypair.public_key_b64, "nonce_b64": hiu_keypair.nonce_b64, "expiry_iso": hiu_keypair.expiry_iso, "patient_abha": consent["patient_abha"]}
-        await (await get_redis()).set(f"abdm:hiu:key:{txn_id}", encrypt_field(json.dumps(key_record)), ex=1800)
+        await redis_client.set(f"abdm:hiu:key:{txn_id}", encrypt_field(json.dumps(key_record)), ex=1800)
 
         payload = {
             "requestId": str(uuid.uuid4()),
@@ -317,7 +360,7 @@ class HIUService:
                     "from": consent["date_from"],
                     "to": consent["date_to"],
                 },
-                "dataPushUrl": f"{self.settings.callback_base_url}/api/v1/abdm/v0.5/health-information/transfer",
+                "dataPushUrl": f"{self.settings.callback_base_url}/api/v3/health-information/transfer",
                 "keyMaterial": hiu_keypair.to_key_material(),
             },
         }
@@ -413,6 +456,15 @@ class HIUService:
             parsed["transaction_id"] = txn_id
             parsed["decryption_cipher"] = "Fidelius ECDH (Curve25519) + AES-256-GCM"
             timeline_items.append(parsed)
+
+        # Confirm transfer receipt only after all included entries decrypt and
+        # parse successfully; failed crypto leaves the gateway eligible to retry.
+        await self.client._make_request(
+            method="POST", endpoint=ABDM_ENDPOINTS["hi_notify"],
+            data={"requestId": str(uuid.uuid4()), "timestamp": utc_timestamp_iso(),
+                  "notification": {"transactionId": txn_id, "sessionStatus": "RECEIVED"}},
+            correlation_id=txn_id,
+        )
 
         existing = _longitudinal_records.get(patient_abha, [])
         existing_ids = {item["bundle_id"] for item in existing}

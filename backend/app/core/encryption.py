@@ -41,15 +41,29 @@ class FieldEncryptor:
         dek, wrapped = self._adapter().generate_data_key()
         nonce = os.urandom(12)
         ciphertext = AESGCM(dek).encrypt(nonce, value.encode("utf-8"), b"hms-field:v1")
-        envelope = json.dumps({"dek": base64.b64encode(wrapped).decode("ascii"), "data": base64.b64encode(ciphertext).decode("ascii")}, separators=(",", ":")).encode()
-        return "v1:{}:{}:{}".format(self._adapter().key_version, base64.b64encode(nonce).decode("ascii"), base64.b64encode(envelope).decode("ascii"))
+        # Four-part, delimiter-safe envelope: version, key identifier, nonce,
+        # and wrapped DEK + authenticated ciphertext/tag. Base64 preserves the
+        # binary 12-byte nonce and KMS ciphertext in a database-safe string.
+        payload = base64.b64encode(wrapped).decode("ascii") + "." + base64.b64encode(ciphertext).decode("ascii")
+        return "v1:{}:{}:{}".format(
+            self._adapter().key_version,
+            base64.b64encode(nonce).decode("ascii"),
+            payload,
+        )
 
     def decrypt(self, token: str) -> str:
         if token.startswith("v1:"):
             version, nonce_b64, payload_b64 = token.split(":", 3)[1:]
-            envelope = json.loads(base64.b64decode(payload_b64, validate=True))
-            dek = self._adapter().unwrap_dek(base64.b64decode(envelope["dek"], validate=True), version)
-            plain = AESGCM(dek).decrypt(base64.b64decode(nonce_b64, validate=True), base64.b64decode(envelope["data"], validate=True), b"hms-field:v1")
+            if "." in payload_b64:
+                wrapped_b64, ciphertext_b64 = payload_b64.split(".", 1)
+            else:
+                # Read the earlier v1 JSON envelope written by the initial
+                # AES-GCM rollout; new writes use the compact four-field form.
+                legacy_envelope = json.loads(base64.b64decode(payload_b64, validate=True))
+                wrapped_b64 = legacy_envelope["dek"]
+                ciphertext_b64 = legacy_envelope["data"]
+            dek = self._adapter().unwrap_dek(base64.b64decode(wrapped_b64, validate=True), version)
+            plain = AESGCM(dek).decrypt(base64.b64decode(nonce_b64, validate=True), base64.b64decode(ciphertext_b64, validate=True), b"hms-field:v1")
             return plain.decode("utf-8")
         # Historical DB values are unprefixed Fernet tokens.
         try:

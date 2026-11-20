@@ -25,25 +25,51 @@ class AuthService:
     """Handles authentication, token lifecycle, and user registration."""
 
     async def authenticate_user(self, db: AsyncSession, email: str, password: str) -> User:
+        from app.core.redis_state import get_redis
+        import time
+        lock_key = f"auth:lockout:{email.strip().lower()}"
+        redis_client = await get_redis()
+        from app.core.config import get_settings
+        if get_settings().ENVIRONMENT.lower() == "production" and redis_client.__class__.__name__ == "InMemoryRedisFallback":
+            raise HTTPException(status_code=503, detail="Authentication service temporarily unavailable")
+        if int(await redis_client.get(lock_key) or 0) >= 5:
+            raise HTTPException(status_code=401, detail="Invalid username and/or password")
         result = await db.execute(
             select(User).where(User.email == email, User.is_deleted == False)  # noqa: E712
         )
         user = result.scalar_one_or_none()
         if user is None or not verify_password(password, user.hashed_password):
+            attempts = await redis_client.incr(lock_key)
+            if attempts == 1:
+                await redis_client.set(lock_key, attempts, ex=900)
+            await redis_client.set(f"{lock_key}:last_failed", str(int(time.time())), ex=86400)
+            if user is not None:
+                has_failure_column = await db.execute(text(
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='last_failed_login')"
+                ))
+                if has_failure_column.scalar_one():
+                    await db.execute(text(
+                        "UPDATE users SET last_failed_login=:failed_at WHERE id=:uid"
+                    ), {"failed_at": datetime.now(timezone.utc), "uid": str(user.id)})
+                    await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
+                detail="Invalid username and/or password",
             )
         if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is deactivated",
             )
+        user._previous_last_login = user.last_login
         user.last_login = datetime.now(timezone.utc)
+        await redis_client.delete(lock_key)
         await db.flush()
         return user
 
-    def create_tokens(self, user: User) -> Token:
+    def create_tokens(self, user: User, session_id: Optional[str] = None) -> Token:
+        import uuid
+        session_id = session_id or str(uuid.uuid4())
         role = user.role if isinstance(user.role, str) else user.role.value
         role_enum = Role(role)
         permissions: List[str] = [p.value for p in ROLE_PERMISSIONS.get(role_enum, set())]
@@ -51,8 +77,9 @@ class AuthService:
             subject=str(user.id),
             role=role,
             permissions=permissions,
+            extra_claims={"sid": session_id},
         )
-        refresh_token = create_refresh_token(subject=str(user.id))
+        refresh_token = create_refresh_token(subject=str(user.id), extra_claims={"sid": session_id})
         return Token(access_token=access_token, refresh_token=refresh_token)
 
     async def refresh_access_token(self, db: AsyncSession, refresh_token: str) -> Token:

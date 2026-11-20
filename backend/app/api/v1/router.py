@@ -1,8 +1,8 @@
 """Central Router: aggregates all API v1 module routers."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-from app.abdm.callbacks import router as abdm_callbacks_router
+from app.abdm.callbacks import router as abdm_callbacks_router, verify_gateway_callback_request
 from app.api.v1.abdm import router as abdm_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.billing import router as billing_router
@@ -53,5 +53,5 @@ api_router.include_router(quality_router)
 api_router.include_router(abdm_router)
 
 # ABDM Webhook Callbacks
-api_router.include_router(abdm_callbacks_router, prefix="/abdm")
+api_router.include_router(abdm_callbacks_router, prefix="/abdm", dependencies=[Depends(verify_gateway_callback_request)])
 

@@ -1,6 +1,7 @@
 """Shared Redis helpers for short lived ABDM workflow state with resilient in-memory fallback."""
 import json
 import logging
+import time
 from typing import Any, Optional
 import redis.asyncio as redis
 
@@ -15,8 +16,15 @@ class InMemoryRedisFallback:
     def __init__(self) -> None:
         self._store: dict[str, str] = {}
         self._lists: dict[str, list[str]] = {}
+        self._expiry: dict[str, float] = {}
+
+    def _purge(self, key: str) -> None:
+        if self._expiry.get(key, 0) and self._expiry[key] <= time.time():
+            self._store.pop(key, None)
+            self._expiry.pop(key, None)
 
     async def get(self, key: str) -> Optional[str]:
+        self._purge(key)
         return self._store.get(key)
 
     async def set(
@@ -26,18 +34,32 @@ class InMemoryRedisFallback:
         ex: Optional[int] = None,
         nx: bool = False,
     ) -> bool:
+        self._purge(key)
         if nx and key in self._store:
             return False
         self._store[key] = str(value)
+        if ex is not None:
+            self._expiry[key] = time.time() + ex
+        else:
+            self._expiry.pop(key, None)
         return True
 
     async def delete(self, key: str) -> int:
+        self._expiry.pop(key, None)
         return 1 if self._store.pop(key, None) is not None else 0
 
     async def incr(self, key: str) -> int:
+        self._purge(key)
         current = int(self._store.get(key, 0)) + 1
         self._store[key] = str(current)
         return current
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        self._purge(key)
+        if key not in self._store:
+            return False
+        self._expiry[key] = time.time() + seconds
+        return True
 
     async def lpush(self, key: str, value: Any) -> int:
         if key not in self._lists:

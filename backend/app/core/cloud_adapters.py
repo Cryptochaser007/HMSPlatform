@@ -93,6 +93,9 @@ class StorageProvider(ABC):
     @abstractmethod
     async def signed_url(self, object_key: str, expires_in: int = 300, **kwargs) -> str: ...
 
+    @abstractmethod
+    async def put_object(self, object_key: str, body: bytes, content_type: str = "application/octet-stream") -> dict: ...
+
 
 class SupabaseStorageAdapter(StorageProvider):
     def __init__(self, url: Optional[str] = None, key: Optional[str] = None, bucket: Optional[str] = None) -> None:
@@ -114,6 +117,19 @@ class SupabaseStorageAdapter(StorageProvider):
             raise RuntimeError("Supabase Storage did not return a signed URL")
         return signed if signed.startswith("http") else f"{self.url}/storage/v1{signed}"
 
+    async def put_object(self, object_key: str, body: bytes, content_type: str = "application/octet-stream") -> dict:
+        import httpx
+        path = quote(object_key, safe="/")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self.url}/storage/v1/object/{quote(self.bucket)}/{path}",
+                headers={"apikey": self.key, "Authorization": f"Bearer {self.key}",
+                         "Content-Type": content_type, "x-upsert": "false"},
+                content=body,
+            )
+            response.raise_for_status()
+            return response.json() if response.content else {"stored": True}
+
 
 class S3StorageAdapter(StorageProvider):
     def __init__(self, bucket: Optional[str] = None, region: str = "ap-south-1", kms_key_id: Optional[str] = None) -> None:
@@ -130,7 +146,7 @@ class S3StorageAdapter(StorageProvider):
     async def signed_url(self, object_key: str, expires_in: int = 300, **kwargs) -> str:
         return self._s3.generate_presigned_url("get_object", Params={"Bucket": self.bucket, "Key": object_key, "ResponseContentType": kwargs.get("content_type", "application/octet-stream")}, ExpiresIn=expires_in)
 
-    def put_object(self, object_key: str, body: bytes, content_type: str = "application/octet-stream") -> dict:
+    async def put_object(self, object_key: str, body: bytes, content_type: str = "application/octet-stream") -> dict:
         return self._s3.put_object(Bucket=self.bucket, Key=object_key, Body=body, ContentType=content_type, ServerSideEncryption="aws:kms", SSEKMSKeyId=self.kms_key_id)
 
 

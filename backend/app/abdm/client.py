@@ -400,6 +400,45 @@ class LiveABDMAdapter(BaseABDMAdapter):
     async def close(self) -> None:
         await self._http.aclose()
 
+    async def get_gateway_jwks(self) -> dict:
+        """Load the NHA gateway JWKS, shared in Redis for its documented cache window."""
+        from app.core.redis_state import get_json, put_json
+        from app.core.redis_state import get_redis
+        redis_client = await get_redis()
+        if redis_client.__class__.__name__ == "InMemoryRedisFallback":
+            raise ABDMError("Redis is required for ABDM JWKS caching", "ABDM-REDIS", 503)
+        cached = await get_json("abdm:gateway:jwks:v3")
+        if cached:
+            return cached
+        try:
+            response = await self._http.get(
+                f"{self.settings.gateway_url}{self.settings.get_endpoint('gateway_certs')}"
+            )
+            response.raise_for_status()
+            jwks = response.json()
+            if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
+                raise ValueError("Gateway certificate response is not a JWKS")
+            await put_json("abdm:gateway:jwks:v3", jwks, 43200)
+            return jwks
+        except Exception as exc:
+            raise ABDMError("Unable to load ABDM gateway signing keys", "ABDM-JWKS", 503) from exc
+
+    async def verify_gateway_jwt(self, token: str) -> dict:
+        """Verify a callback bearer JWT against the NHA v3 gateway JWKS."""
+        from jose import jwt
+        try:
+            header = jwt.get_unverified_header(token)
+            algorithm = header.get("alg")
+            if algorithm not in {"RS256", "ES256"}:
+                raise ValueError("Unsupported callback signing algorithm")
+            jwks = await self.get_gateway_jwks()
+            key = next((item for item in jwks["keys"] if item.get("kid") == header.get("kid")), None)
+            if key is None:
+                raise ValueError("Unknown signing key")
+            return jwt.decode(token, key, algorithms=[algorithm], options={"verify_aud": False})
+        except Exception as exc:
+            raise ABDMError("Invalid ABDM gateway callback JWT", "ABDM-JWT", 401) from exc
+
     def _sign_request(self, body: str) -> str:
         key = self.settings.client_secret.encode("utf-8")
         return hmac.new(key, body.encode("utf-8"), hashlib.sha256).hexdigest()

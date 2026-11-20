@@ -162,6 +162,12 @@ class HIPService:
             "resp": {"requestId": req_id},
         }
         if matched:
+            contexts = matched.get("careContexts") or []
+            if not 1 <= len(contexts) <= 20:
+                on_discover_body["error"] = {"code": 1000, "message": "No discoverable care contexts"}
+            else:
+                on_discover_body["hiType"] = (contexts[0].get("hiType") if isinstance(contexts[0], dict) else None) or "OPConsultation"
+                on_discover_body["count"] = len(contexts)
             on_discover_body["patient"] = matched
         else:
             on_discover_body["error"] = {
@@ -353,9 +359,13 @@ class HIPService:
     ) -> Dict[str, Any]:
         """Push newly created OPD/IPD care contexts from HIP to patient's ABHA locker."""
         req_id = str(uuid.uuid4())
+        if len(care_contexts) > 20:
+            raise ABDMError("Care context count must be between 1 and 20", "ABDM-1027", 422)
         payload = {
             "requestId": req_id,
             "timestamp": utc_timestamp_iso(),
+            "hiType": "OPConsultation",
+            "count": len(care_contexts),
             "link": {
                 "accessToken": link_access_token or await self._client.get_access_token(),
                 "patient": {
@@ -369,6 +379,7 @@ class HIPService:
             method="POST",
             endpoint=ABDM_ENDPOINTS["hip_link_add_contexts"],
             data=payload,
+            headers={"X-LINK-TOKEN": link_access_token} if link_access_token else None,
             user_id=user_id,
         )
 
@@ -395,6 +406,30 @@ class HIPService:
             logger.debug("HIP-initiated link DB persist skipped: %s", exc)
 
         return {"request_id": req_id, "status": "LINK_REQUESTED", "gateway_response": res}
+
+    async def generate_link_token(self, *, patient_id: str, abha_address: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Start HIP initiated link token issuance and retain callback correlation in Redis."""
+        from app.core.redis_state import get_redis
+        redis_client = await get_redis()
+        if self._client.mode.value != "MOCK" and redis_client.__class__.__name__ == "InMemoryRedisFallback":
+            raise ABDMError("Redis is required for HIP link-token rate limiting", "ABDM-REDIS", 503)
+        limit_key = f"abdm:hip:token-limit:{patient_id}"
+        attempts = await redis_client.incr(limit_key)
+        if attempts == 1:
+            await redis_client.expire(limit_key, 86400)
+        if attempts > 3:
+            raise ABDMError("HIP link-token request limit exceeded (3 per 24 hours)", "ABDM-1027", 429)
+        request_id = str(uuid.uuid4())
+        result = await self._client._make_request(
+            method="POST", endpoint=ABDM_ENDPOINTS["hip_generate_link_token"],
+            data={"requestId": request_id, "timestamp": utc_timestamp_iso(),
+                  "patient": {"referenceNumber": patient_id, "id": abha_address}},
+            user_id=user_id,
+        )
+        if result.get("linkToken"):
+            await redis_client.set(f"abdm:hip:link-token:{patient_id}", result["linkToken"], ex=1800)
+        await redis_client.set(f"abdm:hip:link-token-request:{request_id}", patient_id, ex=1800)
+        return {"request_id": request_id, "status": "TOKEN_REQUESTED", "gateway_response": result}
 
     # ------------------------------------------------------------------
     # 4. Consent Notification Webhook (`/v0.5/consents/hip/notify`)

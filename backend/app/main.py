@@ -4,12 +4,13 @@ import traceback
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict
 
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.v1.router import api_router
+from app.abdm.callbacks import router as abdm_v3_callbacks_router, verify_gateway_callback_request
 from app.core.config import get_settings
 from app.core.database import check_db_health
 from app.core.dependencies import RequestIDMiddleware
@@ -85,6 +86,9 @@ app.add_middleware(
         "REQUEST-ID",
         "TIMESTAMP",
         "X-CSRF-Token",
+        "X-HIU-ID",
+        "X-LINK-TOKEN",
+        "X-ABDM-Signature",
     ],
 )
 
@@ -159,4 +163,7 @@ async def root() -> Dict[str, str]:
 
 # Mount API version 1
 app.include_router(api_router, prefix="/api/v1")
+# NHA bridge callback URLs are registered at the v3 root paths. The legacy
+# /api/v1/abdm routes remain mounted above for deployed clients during migration.
+app.include_router(abdm_v3_callbacks_router, prefix="/api", dependencies=[Depends(verify_gateway_callback_request)])
 

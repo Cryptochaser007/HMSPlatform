@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from fastapi import Request, Response
+from fastapi import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 # Sensitive keys whose values must ALWAYS be fully redacted in logs / audit summaries
@@ -169,6 +170,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        # Reject malformed encodings and control characters before routing. Decode
+        # once for traversal checks so percent-encoded paths receive the same guard.
+        from urllib.parse import unquote
+        raw_path = request.scope.get("raw_path", b"").decode("latin-1", "ignore")
+        decoded_path = unquote(unquote(raw_path or request.url.path)).lower()
+        if ("\x00" in raw_path or "%00" in raw_path.lower()
+                or "../" in decoded_path or "%c0%ae%c0%ae/" in raw_path.lower()):
+            return Response("Invalid request path", status_code=400)
+        for name, value in request.headers.items():
+            if any(ch in name or ch in value for ch in ("\r", "\n", "\x00")):
+                return Response("Invalid request header", status_code=400)
+        decoded_query = unquote(request.url.query)
+        if any(ch in decoded_query for ch in ("\r", "\n", "\x00")) or "%00" in request.url.query.lower():
+            return Response("Invalid request parameters", status_code=400)
         response = await call_next(request)
 
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"

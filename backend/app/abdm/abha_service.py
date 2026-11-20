@@ -95,11 +95,8 @@ class ABHAService:
         )
         login_id_val = aadhaar_clean
         if self._client.mode != ABDMMode.MOCK:
-            try:
-                cert = await self.get_nha_public_certificate()
-                login_id_val = self.encrypt_with_nha_rsa_oaep(aadhaar_clean, cert)
-            except Exception as exc:
-                logger.warning("Could not encrypt Aadhaar with NHA cert: %s", exc)
+            cert = await self.get_nha_public_certificate()
+            login_id_val = self.encrypt_with_nha_rsa_oaep(aadhaar_clean, cert)
 
         return await self._client._make_request(
             method="POST",
@@ -128,11 +125,8 @@ class ABHAService:
         logger.info("ABHA v3 Aadhaar OTP verify txnId=%s", txn_id)
         otp_val = otp_clean
         if self._client.mode != ABDMMode.MOCK:
-            try:
-                cert = await self.get_nha_public_certificate()
-                otp_val = self.encrypt_with_nha_rsa_oaep(otp_clean, cert)
-            except Exception as exc:
-                logger.warning("Could not encrypt OTP with NHA cert: %s", exc)
+            cert = await self.get_nha_public_certificate()
+            otp_val = self.encrypt_with_nha_rsa_oaep(otp_clean, cert)
 
         return await self._client._make_request(
             method="POST",
@@ -171,6 +165,9 @@ class ABHAService:
             "ABHA v3 Mobile OTP request (masked=%s)",
             mask_identifier(mobile_clean, 4),
         )
+        login_id = mobile_clean
+        if self._client.mode != ABDMMode.MOCK:
+            login_id = self.encrypt_with_nha_rsa_oaep(mobile_clean, await self.get_nha_public_certificate())
         return await self._client._make_request(
             method="POST",
             endpoint=ABDM_ENDPOINTS["abha_mobile_generate_otp"],
@@ -178,7 +175,7 @@ class ABHAService:
             data={
                 "scope": ["abha-login", "mobile-verify"],
                 "loginHint": "mobile",
-                "loginId": mobile_clean,
+                "loginId": login_id,
                 "otpSystem": "abdm",
             },
             user_id=user_id,
@@ -194,6 +191,9 @@ class ABHAService:
                 error_code="VALIDATION",
                 http_status=422,
             )
+        otp_value = otp_clean
+        if self._client.mode != ABDMMode.MOCK:
+            otp_value = self.encrypt_with_nha_rsa_oaep(otp_clean, await self.get_nha_public_certificate())
         return await self._client._make_request(
             method="POST",
             endpoint=ABDM_ENDPOINTS["abha_mobile_verify_otp"],
@@ -202,7 +202,7 @@ class ABHAService:
                 "scope": ["abha-login", "mobile-verify"],
                 "authData": {
                     "authMethods": ["otp"],
-                    "otp": {"txnId": txn_id, "otpValue": otp_clean},
+                    "otp": {"txnId": txn_id, "otpValue": otp_value},
                 },
             },
             user_id=user_id,
@@ -222,11 +222,14 @@ class ABHAService:
                 error_code="VALIDATION",
                 http_status=422,
             )
+        login_id = cleaned
+        if self._client.mode != ABDMMode.MOCK:
+            login_id = self.encrypt_with_nha_rsa_oaep(cleaned, await self.get_nha_public_certificate())
         return await self._client._make_request(
             method="POST",
             endpoint=ABDM_ENDPOINTS["abha_address_search"],
             target="abha",
-            data={"abhaAddress": cleaned, "healthId": cleaned},
+            data={"abhaAddress": login_id, "healthId": login_id, "loginId": login_id},
             user_id=user_id,
         )
 
@@ -565,6 +568,23 @@ class ABHAService:
 
         CRT_ABHA_106: Resend OTP button activatable max 2 times after 60 seconds.
         """
+        from app.core.redis_state import get_redis
+        redis_client = await get_redis()
+        if self._client.mode != ABDMMode.MOCK and redis_client.__class__.__name__ == "InMemoryRedisFallback":
+            raise ABDMError("OTP resend guard unavailable", "ABDM-OTP-GUARD", 503)
+        key = f"abha:otp-resend:{txn_id}"
+        try:
+            count = int(await redis_client.get(key) or 0)
+            cooldown = await redis_client.get(f"{key}:cooldown")
+            if count >= 2 or cooldown:
+                raise ABDMError("OTP resend limit reached; wait 60 seconds between attempts", "ABDM-OTP-RESEND-LIMIT", 429)
+            await redis_client.set(key, count + 1, ex=86400)
+            await redis_client.set(f"{key}:cooldown", "1", ex=60)
+        except ABDMError:
+            raise
+        except Exception as exc:
+            if self._client.mode != ABDMMode.MOCK:
+                raise ABDMError("OTP resend guard unavailable", "ABDM-OTP-GUARD", 503) from exc
         logger.info("ABHA v3 Resend OTP txnId=%s system=%s", txn_id, otp_system)
         return await self._client._make_request(
             method="POST",
@@ -632,6 +652,9 @@ class ABHAService:
             "ABHA v3 Demographic enrolment (aadhaar_masked=%s)",
             mask_identifier(aadhaar_clean, 4),
         )
+        aadhaar_value = aadhaar_clean
+        if self._client.mode != ABDMMode.MOCK:
+            aadhaar_value = self.encrypt_with_nha_rsa_oaep(aadhaar_clean, await self.get_nha_public_certificate())
 
         return await self._client._make_request(
             method="POST",
@@ -643,7 +666,7 @@ class ABHAService:
                 "authData": {
                     "authMethods": ["demographics"],
                     "demographics": {
-                        "aadhaarNumber": aadhaar_clean,
+                        "aadhaarNumber": aadhaar_value,
                         "name": name.strip(),
                         "gender": gender_upper,
                         "dateOfBirth": date_of_birth,
@@ -679,6 +702,9 @@ class ABHAService:
             "ABHA v3 Communication Mobile login OTP (masked=%s)",
             mask_identifier(mobile_clean, 4),
         )
+        login_id = mobile_clean
+        if self._client.mode != ABDMMode.MOCK:
+            login_id = self.encrypt_with_nha_rsa_oaep(mobile_clean, await self.get_nha_public_certificate())
         return await self._client._make_request(
             method="POST",
             endpoint=ABDM_ENDPOINTS.get("abha_login_request_otp", "/profile/login/request/otp"),
@@ -686,7 +712,7 @@ class ABHAService:
             data={
                 "scope": ["abha-login"],
                 "loginHint": "mobile",
-                "loginId": mobile_clean,
+                "loginId": login_id,
                 "otpSystem": "abdm",
             },
             user_id=user_id,
@@ -703,6 +729,9 @@ class ABHAService:
                 error_code="VALIDATION",
                 http_status=422,
             )
+        otp_value = otp_clean
+        if self._client.mode != ABDMMode.MOCK:
+            otp_value = self.encrypt_with_nha_rsa_oaep(otp_clean, await self.get_nha_public_certificate())
         return await self._client._make_request(
             method="POST",
             endpoint=ABDM_ENDPOINTS.get("abha_login_verify_otp", "/profile/login/verify"),
@@ -711,7 +740,7 @@ class ABHAService:
                 "scope": ["abha-login"],
                 "authData": {
                     "authMethods": ["otp"],
-                    "otp": {"txnId": txn_id, "otpValue": otp_clean},
+                    "otp": {"txnId": txn_id, "otpValue": otp_value},
                 },
             },
             user_id=user_id,
@@ -736,6 +765,9 @@ class ABHAService:
             "ABHA v3 Aadhaar login OTP request (masked=%s)",
             mask_identifier(aadhaar_clean, 4),
         )
+        login_id = aadhaar_clean
+        if self._client.mode != ABDMMode.MOCK:
+            login_id = self.encrypt_with_nha_rsa_oaep(aadhaar_clean, await self.get_nha_public_certificate())
         return await self._client._make_request(
             method="POST",
             endpoint=ABDM_ENDPOINTS.get("abha_login_request_otp", "/profile/login/request/otp"),
@@ -743,7 +775,7 @@ class ABHAService:
             data={
                 "scope": ["abha-login"],
                 "loginHint": "aadhaar",
-                "loginId": aadhaar_clean,
+                "loginId": login_id,
                 "otpSystem": "aadhaar",
             },
             user_id=user_id,
@@ -760,6 +792,9 @@ class ABHAService:
                 error_code="VALIDATION",
                 http_status=422,
             )
+        otp_value = otp_clean
+        if self._client.mode != ABDMMode.MOCK:
+            otp_value = self.encrypt_with_nha_rsa_oaep(otp_clean, await self.get_nha_public_certificate())
         return await self._client._make_request(
             method="POST",
             endpoint=ABDM_ENDPOINTS.get("abha_login_verify_otp", "/profile/login/verify"),
@@ -768,7 +803,7 @@ class ABHAService:
                 "scope": ["abha-login"],
                 "authData": {
                     "authMethods": ["otp"],
-                    "otp": {"txnId": txn_id, "otpValue": otp_clean},
+                    "otp": {"txnId": txn_id, "otpValue": otp_value},
                 },
             },
             user_id=user_id,
@@ -814,8 +849,17 @@ class ABHAService:
             method="GET",
             endpoint=ABDM_ENDPOINTS.get("abha_address_suggestions", "/enrollment/enrol/suggestions"),
             target="abha",
-            headers={"txnId": txn_id},
+            headers={"Transaction_Id": txn_id},
             user_id=user_id,
+        )
+
+    async def enrol_abha_address(self, txn_id: str, abha_address: str, user_id: Optional[str] = None) -> dict:
+        """Finalize selection of an ABHA address returned by the suggestion flow."""
+        if not _RE_ABHA_ADDR.fullmatch(abha_address):
+            raise ABDMError("Invalid ABHA address", "VALIDATION", 422)
+        return await self._client._make_request(
+            method="POST", endpoint=ABDM_ENDPOINTS["abha_address_enrol"], target="abha",
+            headers={"Transaction_Id": txn_id}, data={"abhaAddress": abha_address}, user_id=user_id,
         )
 
     @staticmethod

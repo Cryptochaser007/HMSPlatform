@@ -84,6 +84,11 @@ class HIUFetchRequest(BaseModel):
     consent_artefact_id: str = Field(..., min_length=4, max_length=120)
 
 
+class AbhaAddressEnrollRequest(BaseModel):
+    txn_id: str = Field(..., min_length=4, max_length=120)
+    abha_address: str = Field(..., min_length=4, max_length=255)
+
+
 # =============================================================================
 # Status & Diagnostics (Zero Secrets)
 # =============================================================================
@@ -593,5 +598,19 @@ async def get_abha_address_suggestions(
             user_id=str(current_user.get("id")),
         )
         return result
+    except ABDMError as exc:
+        raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+
+
+@router.post("/abha/address/enrol", dependencies=[Depends(RateLimiter(times=5, seconds=300))])
+async def enrol_abha_address(
+    data: AbhaAddressEnrollRequest,
+    current_user: dict = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Select and enrol an ABHA address suggested for the active transaction."""
+    try:
+        return await abha_service.enrol_abha_address(
+            data.txn_id, data.abha_address, user_id=str(current_user["user_id"])
+        )
     except ABDMError as exc:
         raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
