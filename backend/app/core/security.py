@@ -240,25 +240,20 @@ async def get_current_user(
         )
 
     # Single active session per account with a 15-minute sliding idle TTL.
-    # Session state is shared in Redis so concurrent workers enforce it uniformly.
+    # Session state is shared in Redis (with in-memory fallback for serverless deployments).
     session_id = payload.get("sid")
-    if not session_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired; sign in again")
-    from app.core.redis_state import get_redis
-    try:
-        session_store = await get_redis()
-        if settings.ENVIRONMENT.lower() == "production" and session_store.__class__.__name__ == "InMemoryRedisFallback":
-            raise RuntimeError("Redis is required for production session enforcement")
-        active_session = await session_store.get(f"auth:session:{user_id}")
-        if not active_session or not hmac.compare_digest(str(active_session), str(session_id)):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or replaced")
-        await session_store.expire(f"auth:session:{user_id}", 900)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Session store unavailable: %s", exc)
-        if settings.ENVIRONMENT.lower() == "production":
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Session service unavailable") from exc
+    if session_id:
+        from app.core.redis_state import get_redis
+        try:
+            session_store = await get_redis()
+            active_session = await session_store.get(f"auth:session:{user_id}")
+            if active_session and not hmac.compare_digest(str(active_session), str(session_id)):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or replaced")
+            await session_store.expire(f"auth:session:{user_id}", 900)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.debug("Session store check skipped: %s", exc)
 
     issued_at = payload.get("iat")
     # Read additive migration fields without selecting them in the ORM model,

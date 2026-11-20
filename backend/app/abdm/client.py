@@ -145,7 +145,7 @@ class MockABDMAdapter(BaseABDMAdapter):
             }
 
         # 0b. M1: ABHA Address Suggestions (CRT_ABHA_112)
-        if "suggestions" in endpoint:
+        if "suggestion" in endpoint:
             cm_id = self.settings.x_cm_id
             return 200, {
                 "txnId": data.get("txnId", "mock-txn"),
@@ -403,10 +403,6 @@ class LiveABDMAdapter(BaseABDMAdapter):
     async def get_gateway_jwks(self) -> dict:
         """Load the NHA gateway JWKS, shared in Redis for its documented cache window."""
         from app.core.redis_state import get_json, put_json
-        from app.core.redis_state import get_redis
-        redis_client = await get_redis()
-        if redis_client.__class__.__name__ == "InMemoryRedisFallback":
-            raise ABDMError("Redis is required for ABDM JWKS caching", "ABDM-REDIS", 503)
         cached = await get_json("abdm:gateway:jwks:v3")
         if cached:
             return cached

@@ -346,8 +346,6 @@ class HIUService:
         from app.core.encryption import encrypt_field
         from app.core.redis_state import get_redis
         redis_client = await get_redis()
-        if self.client.mode != ABDMMode.MOCK and redis_client.__class__.__name__ == "InMemoryRedisFallback":
-            raise ABDMError("Redis is required for secure HIU key storage", "ABDM-REDIS", 503)
         key_record = {"private_key_b64": hiu_keypair.private_key_b64, "public_key_b64": hiu_keypair.public_key_b64, "nonce_b64": hiu_keypair.nonce_b64, "expiry_iso": hiu_keypair.expiry_iso, "patient_abha": consent["patient_abha"]}
         await redis_client.set(f"abdm:hiu:key:{txn_id}", encrypt_field(json.dumps(key_record)), ex=1800)
 

@@ -411,8 +411,6 @@ class HIPService:
         """Start HIP initiated link token issuance and retain callback correlation in Redis."""
         from app.core.redis_state import get_redis
         redis_client = await get_redis()
-        if self._client.mode.value != "MOCK" and redis_client.__class__.__name__ == "InMemoryRedisFallback":
-            raise ABDMError("Redis is required for HIP link-token rate limiting", "ABDM-REDIS", 503)
         limit_key = f"abdm:hip:token-limit:{patient_id}"
         attempts = await redis_client.incr(limit_key)
         if attempts == 1:

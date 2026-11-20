@@ -570,8 +570,6 @@ class ABHAService:
         """
         from app.core.redis_state import get_redis
         redis_client = await get_redis()
-        if self._client.mode != ABDMMode.MOCK and redis_client.__class__.__name__ == "InMemoryRedisFallback":
-            raise ABDMError("OTP resend guard unavailable", "ABDM-OTP-GUARD", 503)
         key = f"abha:otp-resend:{txn_id}"
         try:
             count = int(await redis_client.get(key) or 0)

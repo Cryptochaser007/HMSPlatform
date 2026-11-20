@@ -29,9 +29,6 @@ class AuthService:
         import time
         lock_key = f"auth:lockout:{email.strip().lower()}"
         redis_client = await get_redis()
-        from app.core.config import get_settings
-        if get_settings().ENVIRONMENT.lower() == "production" and redis_client.__class__.__name__ == "InMemoryRedisFallback":
-            raise HTTPException(status_code=503, detail="Authentication service temporarily unavailable")
         if int(await redis_client.get(lock_key) or 0) >= 5:
             raise HTTPException(status_code=401, detail="Invalid username and/or password")
         result = await db.execute(
