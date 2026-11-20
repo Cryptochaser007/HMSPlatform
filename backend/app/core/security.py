@@ -3,6 +3,8 @@ Security utilities: password hashing, JWT creation / verification,
 token blacklisting (Redis), and FastAPI auth dependencies.
 """
 
+import logging
+import os
 import bcrypt
 import hmac
 from datetime import datetime, timedelta, timezone
@@ -91,34 +93,63 @@ def decode_token(token: str) -> Dict[str, Any]:
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
 
 
-# ── Token blacklist (Redis) ─────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+
+# ── Token blacklist (Redis + in-memory fallback) ─────────────────────────
 
 _redis_pool: Optional[aioredis.Redis] = None
+_memory_blacklist: Set[str] = set()
 
 
-async def _get_redis() -> aioredis.Redis:
+async def _get_redis() -> Optional[aioredis.Redis]:
     global _redis_pool
-    if _redis_pool is None:
-        _redis_pool = aioredis.from_url(
-            settings.REDIS_URL,
+    if _redis_pool is not None:
+        try:
+            await _redis_pool.ping()
+            return _redis_pool
+        except Exception:
+            _redis_pool = None
+
+    redis_url = getattr(settings, "REDIS_URL", "")
+    if not redis_url or (os.environ.get("VERCEL") and "localhost" in redis_url):
+        return None
+
+    try:
+        client = aioredis.from_url(
+            redis_url,
             decode_responses=True,
+            socket_timeout=0.5,
+            socket_connect_timeout=0.5,
         )
-    return _redis_pool
+        await client.ping()
+        _redis_pool = client
+        return _redis_pool
+    except Exception:
+        return None
 
 
 async def blacklist_token(jti: str, expires_in: int = 3600) -> None:
     """Add a JTI to the shared Redis blacklist until its natural expiry."""
-    r = await _get_redis()
-    await r.setex(f"bl:{jti}", max(expires_in, 60), "1")
+    _memory_blacklist.add(jti)
+    try:
+        r = await _get_redis()
+        if r is not None:
+            await r.setex(f"bl:{jti}", max(expires_in, 60), "1")
+    except Exception as exc:
+        logger.debug("Failed to set blacklist token in Redis: %s", exc)
 
 
 async def is_token_blacklisted(jti: str) -> bool:
     """Return True if the JTI has been blacklisted."""
+    if jti in _memory_blacklist:
+        return True
     try:
         r = await _get_redis()
-        return await r.exists(f"bl:{jti}") > 0
-    except Exception:
-        raise
+        if r is not None:
+            return bool(await r.exists(f"bl:{jti}"))
+    except Exception as exc:
+        logger.debug("Redis token blacklist check skipped: %s", exc)
+    return False
 
 
 # ── FastAPI dependencies ────────────────────────────────────────────────
@@ -180,7 +211,7 @@ async def get_current_user(
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Token revocation service unavailable") from exc
+            logger.debug("Blacklist check skipped due to Redis error: %s", exc)
 
     user_id: Optional[str] = payload.get("sub")
     if not user_id:

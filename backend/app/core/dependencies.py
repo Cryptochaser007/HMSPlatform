@@ -9,6 +9,7 @@ Common FastAPI dependencies re-exported for convenience.
 """
 
 from collections import defaultdict, deque
+import os
 import time
 from typing import Any, Deque, Dict, Optional
 from uuid import uuid4
@@ -55,14 +56,31 @@ async def get_pagination(
 _redis_pool: Optional[aioredis.Redis] = None
 
 
-async def _get_rate_limit_redis() -> aioredis.Redis:
+async def _get_rate_limit_redis() -> Optional[aioredis.Redis]:
     global _redis_pool
-    if _redis_pool is None:
-        _redis_pool = aioredis.from_url(
-            settings.REDIS_URL,
+    if _redis_pool is not None:
+        try:
+            await _redis_pool.ping()
+            return _redis_pool
+        except Exception:
+            _redis_pool = None
+
+    redis_url = getattr(settings, "REDIS_URL", "")
+    if not redis_url or (os.environ.get("VERCEL") and "localhost" in redis_url):
+        return None
+
+    try:
+        client = aioredis.from_url(
+            redis_url,
             decode_responses=True,
+            socket_timeout=0.5,
+            socket_connect_timeout=0.5,
         )
-    return _redis_pool
+        await client.ping()
+        _redis_pool = client
+        return _redis_pool
+    except Exception:
+        return None
 
 
 _memory_rate_buckets: Dict[str, Deque[float]] = defaultdict(deque)
@@ -87,16 +105,17 @@ class RateLimiter:
 
         try:
             r = await _get_rate_limit_redis()
-            current = await r.incr(key)
-            if current == 1:
-                await r.expire(key, self.seconds)
-            if current > self.times:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Rate limit exceeded. Please try again later.",
-                    headers={"Retry-After": str(self.seconds)},
-                )
-            return
+            if r is not None:
+                current = await r.incr(key)
+                if current == 1:
+                    await r.expire(key, self.seconds)
+                if current > self.times:
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="Rate limit exceeded. Please try again later.",
+                        headers={"Retry-After": str(self.seconds)},
+                    )
+                return
         except HTTPException:
             raise
         except Exception:
