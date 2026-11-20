@@ -6,7 +6,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   switchRoleDemo: (role: UserRole) => void;
   isAuthenticated: boolean;
 }
@@ -19,17 +19,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const initAuth = async () => {
-      const token = localStorage.getItem('access_token');
-      if (token) {
-        try {
-          const profile = await authApi.getMe();
-          setUser(profile);
-        } catch (err) {
-          console.error('Session expired or invalid', err);
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('refresh_token');
-        }
-      }
+      try {
+        const profile = await authApi.getMe();
+        setUser(profile);
+      } catch { setUser(null); }
       setLoading(false);
     };
 
@@ -37,18 +30,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, password: string) => {
-    const tokens = await authApi.login(email, password);
-    localStorage.setItem('access_token', tokens.access_token);
-    localStorage.setItem('refresh_token', tokens.refresh_token);
+    await authApi.login(email, password);
     const profile = await authApi.getMe();
     setUser(profile);
   };
 
-  const logout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+  const logout = async () => {
+    try { await authApi.logout(); } finally {
     setUser(null);
     window.location.href = '/login';
+    }
   };
 
   const switchRoleDemo = (role: UserRole) => {

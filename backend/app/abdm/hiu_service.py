@@ -49,9 +49,7 @@ from app.utils.fhir import (
 logger = logging.getLogger("abdm.hiu")
 
 # Ephemeral keypair store (transaction_id -> (FideliusKeyPair, patient_abha))
-_ephemeral_hiu_keys: Dict[str, tuple[FideliusKeyPair, str]] = {}
-# Consent cache & decrypted longitudinal timeline store
-_hiu_consents_memory: Dict[str, Dict[str, Any]] = {}
+# Decrypted longitudinal timeline is intentionally request-local only in this demo.
 _longitudinal_records: Dict[str, List[Dict[str, Any]]] = {}
 
 
@@ -170,8 +168,6 @@ class HIUService:
             "abdm_mode": self.client.mode.value,
             "created_at": now.isoformat(),
         }
-        _hiu_consents_memory[consent_artefact_id] = record
-
         try:
             from app.models.abdm import ABDMConsentArtefact
 
@@ -197,7 +193,8 @@ class HIUService:
             )
             await db.flush()
         except Exception as exc:
-            logger.debug("HIU consent DB persist fallback: %s", exc)
+            logger.error("HIU consent persistence failed: %s", exc)
+            raise
 
         return {
             **record,
@@ -251,13 +248,6 @@ class HIUService:
 
         artefact_ids = [a.get("id") for a in artefacts if isinstance(a, dict) and a.get("id")]
         primary_id = artefact_ids[0] if artefact_ids else consent_req_id
-
-        for cid, rec in list(_hiu_consents_memory.items()):
-            if rec.get("consent_request_id") == consent_req_id or cid == consent_req_id:
-                rec["status"] = consent_status
-                if primary_id and primary_id != cid:
-                    rec["consent_id"] = primary_id
-                    _hiu_consents_memory[primary_id] = rec
 
         try:
             from app.models.abdm import ABDMConsentArtefact
@@ -313,7 +303,10 @@ class HIUService:
         # Generate real ephemeral Curve25519 keypair + 32-byte nonce for this HI session
         hiu_keypair = generate_ephemeral_keypair(ttl_minutes=30)
         txn_id = str(uuid.uuid4())
-        _ephemeral_hiu_keys[txn_id] = (hiu_keypair, consent["patient_abha"])
+        from app.core.encryption import encrypt_field
+        from app.core.redis_state import get_redis
+        key_record = {"private_key_b64": hiu_keypair.private_key_b64, "public_key_b64": hiu_keypair.public_key_b64, "nonce_b64": hiu_keypair.nonce_b64, "expiry_iso": hiu_keypair.expiry_iso, "patient_abha": consent["patient_abha"]}
+        await (await get_redis()).set(f"abdm:hiu:key:{txn_id}", encrypt_field(json.dumps(key_record)), ex=1800)
 
         payload = {
             "requestId": str(uuid.uuid4()),
@@ -388,7 +381,10 @@ class HIUService:
             payload={"transactionId": txn_id, "entry_count": len(entries)},
         )
 
-        stored = _ephemeral_hiu_keys.get(txn_id)
+        from app.core.encryption import decrypt_field
+        from app.core.redis_state import get_redis
+        encrypted = await (await get_redis()).get(f"abdm:hiu:key:{txn_id}")
+        stored = json.loads(decrypt_field(encrypted)) if encrypted else None
         if not stored:
             raise ABDMError(
                 message=f"No active HIU ephemeral keypair found for transaction {txn_id}",
@@ -396,7 +392,8 @@ class HIUService:
                 http_status=400,
             )
 
-        hiu_keypair, patient_abha = stored
+        hiu_keypair = FideliusKeyPair(**{k: stored[k] for k in ("private_key_b64", "public_key_b64", "nonce_b64", "expiry_iso")})
+        patient_abha = stored["patient_abha"]
         timeline_items: List[Dict[str, Any]] = []
 
         for entry in entries:
@@ -423,6 +420,7 @@ class HIUService:
             if item["bundle_id"] not in existing_ids:
                 existing.insert(0, item)
         _longitudinal_records[patient_abha] = existing
+        await (await get_redis()).delete(f"abdm:hiu:key:{txn_id}")
 
         return {
             "status": "RECEIVED",
@@ -471,10 +469,6 @@ class HIUService:
         except Exception:
             pass
 
-        for cid, rec in _hiu_consents_memory.items():
-            if cid not in seen:
-                if not patient_abha or rec["patient_abha"] == patient_abha:
-                    results.append(rec)
         return results
 
     def get_longitudinal_records(self, patient_abha: str) -> List[Dict[str, Any]]:
@@ -483,8 +477,6 @@ class HIUService:
     async def _find_hiu_consent(
         self, db: AsyncSession, consent_id: str
     ) -> Optional[Dict[str, Any]]:
-        if consent_id in _hiu_consents_memory:
-            return _hiu_consents_memory[consent_id]
         try:
             from app.models.abdm import ABDMConsentArtefact
 

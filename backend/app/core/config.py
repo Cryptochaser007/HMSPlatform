@@ -56,8 +56,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
-    # ── Field-level encryption (Fernet) ──────────────────────────────────
+    # ── Field-level encryption ─────────────────────────────────────────
     ENCRYPTION_KEY: str = "CHANGE_ME_GENERATE_WITH_Fernet.generate_key"
+    ENCRYPTION_MASTER_KEY: str = ""
+    CLOUD_PROVIDER: str = "SUPABASE_FREE"
 
     # ── ABDM Integration ─────────────────────────────────────────────────
     ABDM_BASE_URL: str = "https://dev.abdm.gov.in/gateway"

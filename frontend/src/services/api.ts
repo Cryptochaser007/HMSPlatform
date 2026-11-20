@@ -1,6 +1,5 @@
 import axios from 'axios';
 import {
-  AuthTokens,
   User,
   Patient,
   Encounter,
@@ -19,18 +18,13 @@ import {
 // In dev, vite.config.ts proxies /api to backend.
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api/v1',
+  withCredentials: true,
+  xsrfCookieName: 'csrf_token',
+  xsrfHeaderName: 'X-CSRF-Token',
+  withXSRFToken: true,
   headers: {
     'Content-Type': 'application/json',
   },
-});
-
-// Request Interceptor: Attach JWT Token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
 });
 
 // Response Interceptor: Catch 401 and redirect to Login
@@ -38,8 +32,6 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 && !window.location.pathname.includes('/login')) {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -47,10 +39,10 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  login: async (email: string, password: string): Promise<AuthTokens> => {
-    const res = await api.post<AuthTokens>('/auth/login', { email, password });
-    return res.data;
+  login: async (email: string, password: string): Promise<void> => {
+    await api.post('/auth/login', { email, password });
   },
+  logout: async (): Promise<void> => { await api.post('/auth/logout'); },
   signup: async (data: SignupData): Promise<User> => {
     const res = await api.post<User>('/auth/signup', data);
     return res.data;
@@ -59,6 +51,25 @@ export const authApi = {
     const res = await api.get<User>('/auth/me');
     return res.data;
   },
+};
+
+export const registryApi = {
+  syncFacility: async (facilityId: string): Promise<any> => (await api.post('/registry/hfr/sync', null, { params: { facility_id: facilityId } })).data,
+  syncPractitioner: async (registrationNumber: string, council: string): Promise<any> => (await api.post('/registry/hpr/sync', null, { params: { registration_number: registrationNumber, council } })).data,
+};
+
+export const referralsApi = {
+  list: async (patientId?: string): Promise<{ items: any[]; total: number }> => (await api.get('/referrals', { params: { patient_id: patientId } })).data,
+  create: async (data: Record<string, unknown>): Promise<any> => (await api.post('/referrals', data)).data,
+  updateStatus: async (id: string, status: string): Promise<any> => (await api.patch(`/referrals/${id}/status`, null, { params: { new_status: status } })).data,
+};
+
+export const insuranceApi = {
+  listPolicies: async (patientId?: string): Promise<{ items: any[]; total: number }> => (await api.get('/insurance/policies', { params: { patient_id: patientId } })).data,
+  createPolicy: async (data: Record<string, unknown>): Promise<any> => (await api.post('/insurance/policies', data)).data,
+  listClaims: async (patientId?: string): Promise<{ items: any[]; total: number }> => (await api.get('/insurance/claims', { params: { patient_id: patientId } })).data,
+  createClaim: async (data: Record<string, unknown>): Promise<any> => (await api.post('/insurance/claims', data)).data,
+  updateClaimStatus: async (id: string, status: string): Promise<any> => (await api.patch(`/insurance/claims/${id}/status`, null, { params: { new_status: status } })).data,
 };
 
 export const patientsApi = {

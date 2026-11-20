@@ -12,6 +12,7 @@ Supports:
 from __future__ import annotations
 
 import logging
+import json
 import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -31,8 +32,7 @@ _RE_ABHA_NUM = re.compile(r"^\d{2}-?\d{4}-?\d{4}-?\d{4}$")
 _RE_ABHA_ADDR = re.compile(r"^[a-zA-Z0-9._-]{3,64}@(abdm|sbx|ndhm)$", re.IGNORECASE)
 
 # In-memory buffer for Scan & Share counter queue if DB migration 002 is not yet applied
-_share_queue_memory: List[Dict[str, Any]] = []
-_token_counter = 100
+_SHARE_QUEUE_KEY = "abdm:share:queue"
 
 
 class ABHAProfile(BaseModel):
@@ -295,9 +295,6 @@ class ABHAService:
         self, db: AsyncSession, payload: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Process incoming NHA ABHA QR Scan & Share webhook and issue instant OPD token."""
-        global _token_counter
-        _token_counter += 1
-
         req_id = payload.get("requestId") or str(uuid.uuid4())
         intent = payload.get("intent", {})
         meta_data = payload.get("metaData") or {}
@@ -327,7 +324,9 @@ class ABHAService:
 
         hip_id = meta_data.get("hipId") or self._client.settings.hip_id
         counter_id = meta_data.get("context") or intent.get("type") or "OPD-COUNTER-01"
-        token_number = f"TKN-{_token_counter}"
+        from app.core.redis_state import get_redis
+        day_key = datetime.now(timezone.utc).strftime("%Y%m%d")
+        token_number = f"TKN-{await (await get_redis()).incr(f'abdm:share:token:{day_key}') }"
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(minutes=30)
 
@@ -404,7 +403,11 @@ class ABHAService:
                 await db.rollback()
             except Exception:
                 pass
-            _share_queue_memory.insert(0, record_dict)
+            # Redis fallback is shared across workers; protect the patient profile at rest.
+            from app.core.encryption import encrypt_field
+            queue = await get_redis()
+            await queue.lpush(_SHARE_QUEUE_KEY, encrypt_field(json.dumps(record_dict, separators=(",", ":"))))
+            await queue.ltrim(_SHARE_QUEUE_KEY, 0, 499)
 
         # Send async on-share acknowledgement back to NHA Gateway
         on_share_payload = {
@@ -473,7 +476,11 @@ class ABHAService:
                 ]
         except Exception:
             pass
-        return _share_queue_memory[:25]
+        from app.core.redis_state import get_redis
+        from app.core.encryption import decrypt_field
+        queue = await get_redis()
+        values = await queue.lrange(_SHARE_QUEUE_KEY, 0, 24)
+        return [json.loads(decrypt_field(value)) for value in values]
 
     # ------------------------------------------------------------------
     # M1: RSA-OAEP NHA Public Certificate Fetching & Encryption (SANDBOX mode)

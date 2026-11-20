@@ -6,18 +6,16 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from app.core.config import get_settings
+from app.core.database import engine
 from app.main import app
 
 settings = get_settings()
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for test session."""
-    # pyrefly: ignore[deprecated]
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def cleanup_db_pool():
+    yield
+    await engine.dispose()
 
 
 @pytest.fixture

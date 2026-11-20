@@ -18,6 +18,7 @@ from app.models.abdm import (
     ABDMConsentArtefact,
     ABDMTransactionLog,
 )
+from app.models.registry import HFRFacility, HPRPractitioner, Referral, InsurancePolicy, InsuranceClaim
 
 __all__ = [
     "User",
@@ -33,5 +34,6 @@ __all__ = [
     "Consent", "ConsentType", "ConsentStatus",
     "AuditLog",
     "ABDMShareProfile", "ABDMCareContextLink", "ABDMConsentArtefact", "ABDMTransactionLog",
+    "HFRFacility", "HPRPractitioner", "Referral", "InsurancePolicy", "InsuranceClaim",
 ]
 

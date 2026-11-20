@@ -2,14 +2,17 @@
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import secrets
+import hmac
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, audit_log, get_audit_logger
 from app.core.database import get_db
+from app.core.config import get_settings
 from app.core.dependencies import RateLimiter
 from app.core.rbac import Permission, Role
-from app.core.security import get_current_user, require_permissions, require_roles
+from app.core.security import decode_token, get_current_user, require_permissions, require_roles
 from app.schemas.user import ChangePassword, Token, UserCreate, UserLogin, UserResponse
 from app.services.auth_service import auth_service
 
@@ -18,14 +21,14 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post(
     "/login",
-    response_model=Token,
     dependencies=[Depends(RateLimiter(times=10, seconds=60))],
 )
 async def login(
     credentials: UserLogin,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
-) -> Token:
+) -> Dict[str, bool]:
     """Authenticate user with email and password, returning JWT access and refresh tokens."""
     user = await auth_service.authenticate_user(db, credentials.email, credentials.password)
     tokens = auth_service.create_tokens(user)
@@ -41,25 +44,42 @@ async def login(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
-    return tokens
+    secure = request.url.scheme == "https" or get_settings().ENVIRONMENT.lower() == "production"
+    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=1800, path="/")
+    response.set_cookie("refresh_token", tokens.refresh_token, httponly=True, secure=secure, samesite="strict", max_age=604800, path="/api/v1/auth")
+    response.set_cookie("csrf_token", secrets.token_urlsafe(32), httponly=False, secure=secure, samesite="strict", max_age=604800, path="/")
+    return {"authenticated": True}
 
 
 @router.post(
     "/refresh",
-    response_model=Token,
     dependencies=[Depends(RateLimiter(times=20, seconds=60))],
 )
 async def refresh_token(
-    refresh_token: str,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
-) -> Token:
+) -> Dict[str, bool]:
     """Exchange a valid refresh token for a new access token."""
-    return await auth_service.refresh_access_token(db, refresh_token)
+    token = request.cookies.get("refresh_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Refresh session required")
+    csrf_cookie = request.cookies.get("csrf_token", "")
+    csrf_header = request.headers.get("X-CSRF-Token", "")
+    if not csrf_cookie or not hmac.compare_digest(csrf_cookie, csrf_header):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+    tokens = await auth_service.refresh_access_token(db, token)
+    secure = request.url.scheme == "https" or get_settings().ENVIRONMENT.lower() == "production"
+    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=1800, path="/")
+    response.set_cookie("refresh_token", tokens.refresh_token, httponly=True, secure=secure, samesite="strict", max_age=604800, path="/api/v1/auth")
+    response.set_cookie("csrf_token", secrets.token_urlsafe(32), httponly=False, secure=secure, samesite="strict", max_age=604800, path="/")
+    return {"authenticated": True}
 
 
 @router.post("/logout")
 async def logout(
     request: Request,
+    response: Response,
     current_user: Dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, str]:
@@ -67,6 +87,17 @@ async def logout(
     jti = current_user.get("jti")
     if jti:
         await auth_service.blacklist_token(jti)
+    refresh = request.cookies.get("refresh_token")
+    if refresh:
+        try:
+            refresh_payload = decode_token(refresh)
+        except Exception:
+            refresh_payload = {}
+        refresh_jti = refresh_payload.get("jti")
+        expires = refresh_payload.get("exp")
+        if refresh_payload.get("type") == "refresh" and refresh_jti:
+            import time
+            await auth_service.blacklist_token(refresh_jti, max(int(expires - time.time()), 60))
 
     logger = await get_audit_logger()
     await logger.log(
@@ -78,6 +109,9 @@ async def logout(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/api/v1/auth")
+    response.delete_cookie("csrf_token", path="/")
     return {"message": "Successfully logged out"}
 
 
@@ -145,7 +179,16 @@ async def get_my_profile(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> UserResponse:
     """Return profile and permissions of authenticated user."""
-    return UserResponse.model_validate(current_user["db_user"])
+    db_user = current_user.get("db_user")
+    if db_user:
+        return UserResponse.model_validate(db_user)
+    return UserResponse(
+        id=current_user.get("user_id") or current_user.get("id", ""),
+        email=current_user.get("email", "admin@hms.local"),
+        name=current_user.get("name") or current_user.get("username", "Admin"),
+        role=current_user.get("role") or (current_user.get("roles", ["SUPER_ADMIN"])[0]),
+        is_active=True,
+    )
 
 
 @router.put("/change-password")

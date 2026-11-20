@@ -4,6 +4,7 @@ token blacklisting (Redis), and FastAPI auth dependencies.
 """
 
 import bcrypt
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set
 from uuid import uuid4
@@ -11,7 +12,7 @@ from uuid import uuid4
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import redis.asyncio as aioredis
@@ -93,7 +94,6 @@ def decode_token(token: str) -> Dict[str, Any]:
 # ── Token blacklist (Redis) ─────────────────────────────────────────────
 
 _redis_pool: Optional[aioredis.Redis] = None
-_memory_blacklist: Dict[str, float] = {}
 
 
 async def _get_redis() -> aioredis.Redis:
@@ -107,41 +107,28 @@ async def _get_redis() -> aioredis.Redis:
 
 
 async def blacklist_token(jti: str, expires_in: int = 3600) -> None:
-    """Add a JTI to the Redis blacklist (and local fallback) until its natural expiry."""
-    import time
-
-    _memory_blacklist[jti] = time.time() + max(expires_in, 60)
-    try:
-        r = await _get_redis()
-        await r.setex(f"bl:{jti}", max(expires_in, 60), "1")
-    except Exception:
-        pass
+    """Add a JTI to the shared Redis blacklist until its natural expiry."""
+    r = await _get_redis()
+    await r.setex(f"bl:{jti}", max(expires_in, 60), "1")
 
 
 async def is_token_blacklisted(jti: str) -> bool:
     """Return True if the JTI has been blacklisted."""
-    import time
-
-    exp = _memory_blacklist.get(jti)
-    if exp is not None:
-        if exp > time.time():
-            return True
-        _memory_blacklist.pop(jti, None)
     try:
         r = await _get_redis()
         return await r.exists(f"bl:{jti}") > 0
     except Exception:
-        return False
+        raise
 
 
 # ── FastAPI dependencies ────────────────────────────────────────────────
 
-bearer_scheme = HTTPBearer(auto_error=True)
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Extract and validate the JWT from the Authorization header.
@@ -150,7 +137,15 @@ async def get_current_user(
     containing the SQLAlchemy User instance.
     """
     # Extract and clean token (handles accidental 'Bearer ' prefix, quotes, or whitespace from Swagger UI)
-    raw_token = credentials.credentials.strip()
+    cookie_auth = credentials is None
+    raw_token = (credentials.credentials if credentials else request.cookies.get("access_token", "")).strip()
+    if not raw_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if cookie_auth and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+        csrf_cookie = request.cookies.get("csrf_token")
+        csrf_header = request.headers.get("x-csrf-token")
+        if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF validation failed")
     if raw_token.startswith("Bearer "):
         raw_token = raw_token[7:].strip()
     token = raw_token.strip("\"'")
@@ -184,8 +179,8 @@ async def get_current_user(
                 )
         except HTTPException:
             raise
-        except Exception:
-            pass  # If Redis is unavailable, proceed without blacklist validation
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Token revocation service unavailable") from exc
 
     user_id: Optional[str] = payload.get("sub")
     if not user_id:
@@ -212,6 +207,20 @@ async def get_current_user(
             detail="User account is deactivated or has been deleted",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    issued_at = payload.get("iat")
+    # Read additive migration fields without selecting them in the ORM model,
+    # so pre-003 databases continue to authenticate during rolling deployment.
+    columns = (await db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name IN ('hospital_id','tokens_valid_after')"))).scalars().all()
+    if "hospital_id" in columns:
+        hospital_id = (await db.execute(text("SELECT hospital_id FROM users WHERE id=:uid"), {"uid": user_id})).scalar_one_or_none()
+        if hospital_id:
+            await db.execute(text("SELECT set_config('app.hospital_id', :hospital_id, true)"), {"hospital_id": str(hospital_id)})
+    revoked_after = None
+    if "tokens_valid_after" in columns:
+        revoked_after = (await db.execute(text("SELECT tokens_valid_after FROM users WHERE id=:uid"), {"uid": user_id})).scalar_one_or_none()
+    if revoked_after and issued_at and datetime.fromtimestamp(float(issued_at), timezone.utc) <= revoked_after:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
 
     return {
         "user_id": user_id,

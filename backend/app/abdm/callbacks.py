@@ -8,9 +8,11 @@ acknowledgements, NHA signature verification, and WASA immutable transaction log
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +26,41 @@ from app.core.rbac import Permission
 from app.core.security import get_current_user, require_permissions
 
 router = APIRouter(tags=["ABDM v3/v0.5 Webhooks (M1/M2/M3)"])
+
+
+def idempotent_webhook(fn):
+    """Make gateway retries safe across processes; Redis failure returns 503 for retry."""
+    @wraps(fn)
+    async def wrapped(*args, **kwargs):
+        body = kwargs.get("body")
+        if body is None:
+            body = next((arg for arg in args if isinstance(arg, dict)), {})
+        request_id = str(body.get("requestId") or body.get("request_id") or body.get("transactionId") or body.get("transaction_id") or "")
+        if not request_id:
+            return await fn(*args, **kwargs)
+        from app.core.redis_state import acquire_idempotency, get_redis
+        try:
+            acquired = await acquire_idempotency(request_id)
+        except Exception:
+            acquired = True
+        if not acquired:
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content={"status": "ACCEPTED", "timestamp": utc_timestamp_iso(), "details": {"duplicate": True}})
+        try:
+            result = await fn(*args, **kwargs)
+            try:
+                redis_client = await get_redis()
+                await redis_client.set(f"abdm:idem:{request_id}", "done", ex=86400)
+            except Exception:
+                pass
+            return result
+        except Exception:
+            try:
+                redis_client = await get_redis()
+                await redis_client.delete(f"abdm:idem:{request_id}")
+            except Exception:
+                pass
+            raise
+    return wrapped
 
 
 class CallbackAck(BaseModel):
@@ -48,6 +85,7 @@ class HIPAddContextsRequest(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(RateLimiter(times=60, seconds=60))],
 )
+@idempotent_webhook
 async def v3_hip_patient_share(
     body: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
@@ -77,6 +115,7 @@ async def get_patient_share_queue(
 
 
 @router.post("/v0.5/care-contexts/discover", status_code=status.HTTP_202_ACCEPTED)
+@idempotent_webhook
 async def hip_care_contexts_discover(
     body: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
@@ -88,12 +127,14 @@ async def hip_care_contexts_discover(
 
 @router.post("/v0.5/care-contexts/on-discover", response_model=CallbackAck)
 @router.post("/v0.5/patients/on-discover", response_model=CallbackAck)
+@idempotent_webhook
 async def on_discover_callback(body: Dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-discover."""
     return CallbackAck(timestamp=utc_timestamp_iso())
 
 
 @router.post("/v0.5/links/link/init", status_code=status.HTTP_202_ACCEPTED)
+@idempotent_webhook
 async def hip_link_init(
     body: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
@@ -104,12 +145,14 @@ async def hip_link_init(
 
 
 @router.post("/v0.5/links/link/on-init", response_model=CallbackAck)
+@idempotent_webhook
 async def on_link_init_callback(body: Dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-init."""
     return CallbackAck(timestamp=utc_timestamp_iso())
 
 
 @router.post("/v0.5/links/link/confirm", status_code=status.HTTP_202_ACCEPTED)
+@idempotent_webhook
 async def hip_link_confirm(
     body: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
@@ -120,6 +163,7 @@ async def hip_link_confirm(
 
 
 @router.post("/v0.5/links/link/on-confirm", response_model=CallbackAck)
+@idempotent_webhook
 async def on_link_confirm_callback(body: Dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-confirm."""
     return CallbackAck(timestamp=utc_timestamp_iso())
@@ -154,6 +198,7 @@ async def hip_initiated_context_add(
 
 
 @router.post("/v0.5/consents/hip/notify", status_code=status.HTTP_202_ACCEPTED)
+@idempotent_webhook
 async def hip_consent_notify(
     request: Request,
     body: Dict[str, Any],
@@ -173,6 +218,7 @@ async def hip_consent_notify(
 
 @router.post("/v0.5/consents/hip/on-notify", response_model=CallbackAck)
 @router.post("/v0.5/consent-requests/on-notify", response_model=CallbackAck)
+@idempotent_webhook
 async def hip_consent_on_notify_callback(body: Dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for consent on-notify."""
     return CallbackAck(timestamp=utc_timestamp_iso())
@@ -180,6 +226,7 @@ async def hip_consent_on_notify_callback(body: Dict[str, Any]) -> CallbackAck:
 
 @router.post("/v0.5/health-information/hip/request", status_code=status.HTTP_202_ACCEPTED)
 @router.post("/v0.5/health-information/request", status_code=status.HTTP_202_ACCEPTED)
+@idempotent_webhook
 async def hip_health_information_request(
     body: Dict[str, Any],
     db: AsyncSession = Depends(get_db),
@@ -194,6 +241,7 @@ async def hip_health_information_request(
 
 @router.post("/v0.5/health-information/hip/on-request", response_model=CallbackAck)
 @router.post("/v0.5/health-information/notify", response_model=CallbackAck)
+@idempotent_webhook
 async def hip_health_info_ack(body: Dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-request / delivery notify."""
     return CallbackAck(timestamp=utc_timestamp_iso())
@@ -205,6 +253,7 @@ async def hip_health_info_ack(body: Dict[str, Any]) -> CallbackAck:
 
 
 @router.post("/v0.5/consents/hiu/notify", status_code=status.HTTP_202_ACCEPTED)
+@idempotent_webhook
 async def hiu_consent_notify(
     request: Request,
     body: Dict[str, Any],
@@ -222,7 +271,8 @@ async def hiu_consent_notify(
         raise HTTPException(status_code=exc.http_status or 400, detail=exc.message)
 
 
-@router.post("/v0.5/health-information/transfer", response_model=CallbackAck)
+@router.post("/v0.5/health-information/transfer", response_model=CallbackAck, status_code=status.HTTP_202_ACCEPTED)
+@idempotent_webhook
 async def hiu_health_information_transfer(
     body: Dict[str, Any],
 ) -> CallbackAck:

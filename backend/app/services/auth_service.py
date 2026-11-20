@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rbac import ROLE_PERMISSIONS, Permission, Role
@@ -125,6 +125,9 @@ class AuthService:
                 detail="Current password is incorrect",
             )
         user.hashed_password = hash_password(new_password)
+        has_revocation_column = await db.execute(text("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='tokens_valid_after')"))
+        if has_revocation_column.scalar_one():
+            await db.execute(text("UPDATE users SET tokens_valid_after=:revoked_at WHERE id=:uid"), {"revoked_at": datetime.now(timezone.utc), "uid": user_id})
         await db.flush()
 
     async def blacklist_token(self, jti: str, expires_in: int = 1800) -> None:

@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("🛑 Shutting down HMS Platform API server.")
 
 
+is_production = settings.ENVIRONMENT.lower() == "production"
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
@@ -59,9 +60,9 @@ app = FastAPI(
 7. Billing & Revenue Management
 8. Quality & Accreditation Management
     """,
-    openapi_url="/api/v1/openapi.json",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    openapi_url=None if is_production else "/api/v1/openapi.json",
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
     lifespan=lifespan,
 )
 
@@ -83,6 +84,7 @@ app.add_middleware(
         "X-CM-ID",
         "REQUEST-ID",
         "TIMESTAMP",
+        "X-CSRF-Token",
     ],
 )
 
@@ -145,12 +147,14 @@ async def health_check() -> Dict[str, Any]:
 @app.get("/", tags=["System Diagnostics"])
 async def root() -> Dict[str, str]:
     """Root info endpoint."""
-    return {
+    payload = {
         "app": settings.APP_NAME,
         "version": settings.VERSION,
-        "docs": "/docs",
         "health": "/health",
     }
+    if not is_production:
+        payload["docs"] = "/docs"
+    return payload
 
 
 # Mount API version 1

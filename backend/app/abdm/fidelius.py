@@ -18,17 +18,54 @@ import base64
 import hashlib
 import hmac
 import os
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric.x25519 import (
-    X25519PrivateKey,
-    X25519PublicKey,
-)
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+# ABDM's Java Fidelius reference uses Curve25519 in short-Weierstrass form.
+
+_P = 2**255 - 19
+_A = int("2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa984914a144", 16)
+_B = int("7b425ed097b425ed097b425ed097b425ed097b425ed097b4260b5e9c7710c864", 16)
+_N = int("1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed", 16)
+_GX = int("2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad245a", 16)
+_GY = int("20ae19a1b8a086b4e01edd2c7748d14c923d4d7e6d7c61b229e9c5a27eced3d9", 16)
+def _point_add(left: Optional[tuple[int, int]], right: Optional[tuple[int, int]]) -> Optional[tuple[int, int]]:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    x1, y1 = left
+    x2, y2 = right
+    if x1 == x2 and (y1 + y2) % _P == 0:
+        return None
+    if left == right:
+        slope = (3 * x1 * x1 + _A) * pow(2 * y1, -1, _P) % _P
+    else:
+        slope = (y2 - y1) * pow((x2 - x1) % _P, -1, _P) % _P
+    x3 = (slope * slope - x1 - x2) % _P
+    return x3, (slope * (x1 - x3) - y1) % _P
+
+
+def _scalar_mult(scalar: int, point: tuple[int, int], allow_infinity: bool = False) -> Optional[tuple[int, int]]:
+    # Short-Weierstrass arithmetic over the BouncyCastle Curve25519 parameters.
+    # Python big-integer operations are not constant-time; use a hardened native
+    # implementation before treating this module as a production cryptographic boundary.
+    result: Optional[tuple[int, int]] = None
+    addend: Optional[tuple[int, int]] = point
+    while scalar:
+        if scalar & 1:
+            result = _point_add(result, addend)
+        addend = _point_add(addend, addend)
+        scalar >>= 1
+    if result is None and not allow_infinity:
+        raise ValueError("Invalid point multiplication result")
+    return result
 
 
 @dataclass
@@ -55,19 +92,15 @@ class FideliusKeyPair:
 
 
 def generate_ephemeral_keypair(ttl_minutes: int = 30) -> FideliusKeyPair:
-    """Generate a fresh Curve25519 keypair and 32-byte random nonce."""
-    private_key = X25519PrivateKey.generate()
-    public_key = private_key.public_key()
-
-    priv_bytes = private_key.private_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PrivateFormat.Raw,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    pub_bytes = public_key.public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw,
-    )
+    """Generate BouncyCastle-compatible Weierstrass Curve25519 keys and nonce."""
+    private_scalar = secrets.randbelow(_N - 1) + 1
+    public_point = _scalar_mult(private_scalar, (_GX, _GY))
+    assert public_point is not None
+    public_x, public_y = public_point
+    priv_bytes = private_scalar.to_bytes(32, "big")
+    # Fidelius keyMaterial.keyValue carries the uncompressed point. SPKI DER is
+    # accepted by the decoder for Java callers that send x509PublicKey instead.
+    pub_bytes = b"\x04" + public_x.to_bytes(32, "big") + public_y.to_bytes(32, "big")
     nonce_bytes = os.urandom(32)
     expiry = (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).strftime(
         "%Y-%m-%dT%H:%M:%S.%f"
@@ -81,27 +114,100 @@ def generate_ephemeral_keypair(ttl_minutes: int = 30) -> FideliusKeyPair:
     )
 
 
-def _load_x25519_public_key(key_b64: str) -> X25519PublicKey:
-    """Load an X25519 public key from either raw 32-byte base64 or X.509 SPKI DER base64."""
-    raw = base64.b64decode(key_b64.strip())
-    if len(raw) == 32:
-        return X25519PublicKey.from_public_bytes(raw)
-    # Fidelius/BouncyCastle X.509 SubjectPublicKeyInfo DER encoding (typically 44 bytes)
-    loaded = serialization.load_der_public_key(raw)
-    if not isinstance(loaded, X25519PublicKey):
-        raise ValueError("Provided public key is not a Curve25519 (X25519) key")
-    return loaded
+def _der_length(size: int) -> bytes:
+    if size < 128:
+        return bytes([size])
+    encoded = size.to_bytes((size.bit_length() + 7) // 8, "big")
+    return bytes([0x80 | len(encoded)]) + encoded
 
 
-def _load_x25519_private_key(key_b64: str) -> X25519PrivateKey:
-    """Load an X25519 private key from raw 32-byte base64 or PKCS#8 DER base64."""
+def _tlv(tag: int, value: bytes) -> bytes:
+    return bytes([tag]) + _der_length(len(value)) + value
+
+
+def _der_integer(value: int) -> bytes:
+    raw = value.to_bytes(max(1, (value.bit_length() + 7) // 8), "big")
+    if raw[0] & 0x80:
+        raw = b"\x00" + raw
+    return _tlv(0x02, raw)
+
+
+def _encode_spki(x: int, y: int) -> bytes:
+    """Build an X.509 SPKI with explicit BouncyCastle Curve25519 parameters."""
+    oid_ec_public_key = bytes.fromhex("2a8648ce3d0201")
+    oid_prime_field = bytes.fromhex("2a8646ce3d0101")
+    curve = _tlv(0x30, _tlv(0x04, _A.to_bytes(32, "big")) + _tlv(0x04, _B.to_bytes(32, "big")))
+    field = _tlv(0x30, _tlv(0x06, oid_prime_field) + _der_integer(_P))
+    base = _tlv(0x04, b"\x04" + _GX.to_bytes(32, "big") + _GY.to_bytes(32, "big"))
+    params = _tlv(0x30, _der_integer(1) + field + curve + base + _der_integer(_N) + _der_integer(8))
+    algorithm = _tlv(0x30, _tlv(0x06, oid_ec_public_key) + params)
+    point = b"\x04" + x.to_bytes(32, "big") + y.to_bytes(32, "big")
+    return _tlv(0x30, algorithm + _tlv(0x03, b"\x00" + point))
+
+
+def _read_length(data: bytes, offset: int) -> tuple[int, int]:
+    first = data[offset]
+    if first < 128:
+        return first, offset + 1
+    count = first & 0x7f
+    if count == 0 or count > 4:
+        raise ValueError("Invalid DER length")
+    return int.from_bytes(data[offset + 1:offset + 1 + count], "big"), offset + 1 + count
+
+
+def _spki_point(der: bytes) -> tuple[int, int]:
+    """Extract uncompressed point from an explicit-parameter SPKI BIT STRING."""
+    def walk(data: bytes):
+        offset = 0
+        while offset < len(data):
+            tag = data[offset]
+            size, start = _read_length(data, offset + 1)
+            end = start + size
+            if end > len(data):
+                raise ValueError("Truncated DER key")
+            value = data[start:end]
+            yield tag, value
+            if tag == 0x30:
+                yield from walk(value)
+            offset = end
+    points = [v[1:] for tag, v in walk(der) if tag == 0x03 and len(v) == 66 and v[0] == 0 and v[1] == 4]
+    if not points:
+        raise ValueError("Expected a BouncyCastle explicit-parameter Curve25519 SPKI with an uncompressed point")
+    raw = points[-1]
+    return int.from_bytes(raw[1:33], "big"), int.from_bytes(raw[33:], "big")
+
+
+def _load_curve25519_public_key(key_b64: str) -> tuple[int, int]:
+    raw = base64.b64decode(key_b64.strip(), validate=True)
+    if len(raw) == 65 and raw[0] == 4:
+        x, y = int.from_bytes(raw[1:33], "big"), int.from_bytes(raw[33:], "big")
+    elif len(raw) == 32:
+        raise ValueError("32-byte Montgomery X25519 keys are not compatible with ABDM's Weierstrass Fidelius curve")
+    else:
+        x, y = _spki_point(raw)
+    if (y * y - (x * x * x + _A * x + _B)) % _P:
+        raise ValueError("Public key point is not on the ABDM Curve25519 Weierstrass curve")
+    if _scalar_mult(_N, (x, y), allow_infinity=True) is not None:
+        raise ValueError("Public key point is outside the Fidelius prime-order subgroup")
+    return x, y
+
+
+def _load_private_scalar(key_b64: str) -> int:
+    """Load the big-endian 32-byte Fidelius private scalar."""
     raw = base64.b64decode(key_b64.strip())
-    if len(raw) == 32:
-        return X25519PrivateKey.from_private_bytes(raw)
-    loaded = serialization.load_der_private_key(raw, password=None)
-    if not isinstance(loaded, X25519PrivateKey):
-        raise ValueError("Provided private key is not a Curve25519 (X25519) key")
-    return loaded
+    if len(raw) != 32:
+        raise ValueError("Fidelius private key must be a 32-byte scalar")
+    scalar = int.from_bytes(raw, "big")
+    if not 1 <= scalar < _N:
+        raise ValueError("Fidelius private scalar is out of range")
+    return scalar
+
+
+def _shared_secret(private_key_b64: str, public_key_b64: str) -> bytes:
+    shared_point = _scalar_mult(_load_private_scalar(private_key_b64), _load_curve25519_public_key(public_key_b64))
+    assert shared_point is not None
+    shared_x, _ = shared_point
+    return shared_x.to_bytes(32, "big")
 
 
 def _decode_nonce(nonce_str: str) -> bytes:
@@ -163,10 +269,7 @@ def encrypt_fhir_bundle(
     if not peer_pub_b64 or not peer_nonce:
         raise ValueError("Missing receiver dhPublicKey.keyValue or nonce in keyMaterial")
 
-    priv_key = _load_x25519_private_key(kp.private_key_b64)
-    peer_pub = _load_x25519_public_key(peer_pub_b64)
-
-    shared_secret = priv_key.exchange(peer_pub)
+    shared_secret = _shared_secret(kp.private_key_b64, peer_pub_b64)
     aes_key, iv = _derive_aes_key_and_iv(shared_secret, kp.nonce_b64, peer_nonce)
 
     ciphertext = AESGCM(aes_key).encrypt(iv, plaintext_json.encode("utf-8"), None)
@@ -197,10 +300,7 @@ def decrypt_fhir_bundle(
     if not sender_pub_b64 or not sender_nonce:
         raise ValueError("Missing sender dhPublicKey.keyValue or nonce in keyMaterial")
 
-    priv_key = _load_x25519_private_key(receiver_keypair.private_key_b64)
-    sender_pub = _load_x25519_public_key(sender_pub_b64)
-
-    shared_secret = priv_key.exchange(sender_pub)
+    shared_secret = _shared_secret(receiver_keypair.private_key_b64, sender_pub_b64)
     aes_key, iv = _derive_aes_key_and_iv(
         shared_secret, sender_nonce, receiver_keypair.nonce_b64
     )

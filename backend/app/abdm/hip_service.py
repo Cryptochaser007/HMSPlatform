@@ -46,8 +46,7 @@ from app.utils.fhir import (
 
 logger = logging.getLogger("abdm.hip")
 
-# In-memory mirrors for seamless MOCK/demo operation even before DDL 002 runs
-_hip_consents_memory: Dict[str, Dict[str, Any]] = {}
+# Link state remains backed by ABDM care-context rows; never cache consent state per worker.
 _hip_links_memory: Dict[str, Dict[str, Any]] = {}
 
 
@@ -462,8 +461,6 @@ class HIPService:
             "hiu_id": detail.get("hiu", {}).get("id"),
             "signature_verified": is_verified,
         }
-        _hip_consents_memory[consent_id] = artefact_record
-
         try:
             from app.models.abdm import ABDMConsentArtefact
 
@@ -728,8 +725,6 @@ class HIPService:
     async def _load_consent_artefact(
         self, db: AsyncSession, consent_id: str
     ) -> Optional[Dict[str, Any]]:
-        if consent_id in _hip_consents_memory:
-            return _hip_consents_memory[consent_id]
         try:
             from app.models.abdm import ABDMConsentArtefact
 

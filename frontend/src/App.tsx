@@ -10,6 +10,7 @@ import { DoctorEMR } from './pages/DoctorEMR';
 import { AbhaPortal } from './pages/AbhaPortal';
 import { RBACMatrix } from './pages/RBACMatrix';
 import { WardOccupancy } from './pages/WardOccupancy';
+import { ModulePortal } from './pages/ModulePortal';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -51,6 +52,12 @@ export const App: React.FC = () => {
             <Route path="emr" element={<DoctorEMR />} />
             <Route path="wards" element={<WardOccupancy />} />
             <Route path="rbac" element={<RBACMatrix />} />
+            <Route path="patient-portal" element={<ModulePortal title="Patient Portal" description="Patient appointments, records, consent and care updates." />} />
+            <Route path="admin" element={<ModulePortal title="Administration" description="Hospital configuration, staff access and registry management." />} />
+            <Route path="billing" element={<ModulePortal title="Billing & Insurance" description="Billing, pre-authorization and claim lifecycle." endpoint="/insurance/claims" />} />
+            <Route path="pharmacy" element={<ModulePortal title="Pharmacy" description="Medication dispensing and pharmacy operations." endpoint="/pharmacy/drugs" />} />
+            <Route path="laboratory" element={<ModulePortal title="Laboratory" description="Laboratory orders, results and verification." endpoint="/lab/tests" />} />
+            <Route path="radiology" element={<ModulePortal title="Radiology" description="Imaging orders, reports and review." endpoint="/radiology/orders" />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

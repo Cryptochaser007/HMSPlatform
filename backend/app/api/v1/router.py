@@ -13,6 +13,7 @@ from app.api.v1.patients import router as patients_router
 from app.api.v1.pharmacy import router as pharmacy_router
 from app.api.v1.quality import router as quality_router
 from app.api.v1.radiology import router as radiology_router
+from app.api.v1.registry import router as registry_router
 from app.api.v1.ward import router as ward_router
 
 api_router = APIRouter()
@@ -37,6 +38,7 @@ api_router.include_router(lab_router)
 
 # Radiology & PACS
 api_router.include_router(radiology_router)
+api_router.include_router(registry_router)
 
 # Billing & Financials
 api_router.include_router(billing_router)

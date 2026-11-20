@@ -24,12 +24,18 @@ from app.main import app
 
 client = TestClient(app)
 
-# Override auth dependency for tests
-app.dependency_overrides[get_current_user] = lambda: {
-    "id": "test-admin-uuid-001",
-    "username": "tester",
-    "roles": ["ADMIN"],
-}
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "test-admin-uuid-001",
+        "user_id": "test-admin-uuid-001",
+        "username": "tester",
+        "role": "SUPER_ADMIN",
+        "roles": ["SUPER_ADMIN"],
+        "permissions": ["PATIENT_CREATE", "PATIENT_READ", "PATIENT_UPDATE", "EMR_CREATE", "EMR_READ"],
+    }
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # ==============================================================================
@@ -275,3 +281,4 @@ def test_rsa_oaep_encryption_helper():
     ciphertext_b64 = abha_service.encrypt_with_nha_rsa_oaep(plaintext, public_pem)
     assert ciphertext_b64 != plaintext
     assert len(ciphertext_b64) > 100
+
