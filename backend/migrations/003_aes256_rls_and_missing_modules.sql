@@ -46,7 +46,16 @@ DO $$ DECLARE t TEXT; BEGIN
       IF t = 'abdm_transaction_logs' AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'abdm_transaction_logs'::regclass AND tgname = 'trg_abdm_txn_logs_no_update') THEN
         EXECUTE 'ALTER TABLE abdm_transaction_logs DISABLE TRIGGER trg_abdm_txn_logs_no_update';
       END IF;
+      -- The security migration may already have installed the append-only
+      -- audit trigger. Disable it only for this one-time tenant backfill;
+      -- the trigger is immediately restored below in the same transaction.
+      IF t = 'audit_logs' AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'audit_logs'::regclass AND tgname = 'trg_audit_logs_no_mutation') THEN
+        EXECUTE 'ALTER TABLE audit_logs DISABLE TRIGGER trg_audit_logs_no_mutation';
+      END IF;
       EXECUTE format('UPDATE %I SET hospital_id = hms_default_hospital_id() WHERE hospital_id IS NULL', t);
+      IF t = 'audit_logs' AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'audit_logs'::regclass AND tgname = 'trg_audit_logs_no_mutation') THEN
+        EXECUTE 'ALTER TABLE audit_logs ENABLE TRIGGER trg_audit_logs_no_mutation';
+      END IF;
       IF t = 'abdm_transaction_logs' AND EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'abdm_transaction_logs'::regclass AND tgname = 'trg_abdm_txn_logs_no_update') THEN
         EXECUTE 'ALTER TABLE abdm_transaction_logs ENABLE TRIGGER trg_abdm_txn_logs_no_update';
       END IF;
