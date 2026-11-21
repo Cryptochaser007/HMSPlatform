@@ -29,12 +29,12 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest.fixture
 async def auth_client(async_client: AsyncClient) -> AsyncClient:
-    """Async HTTP test client authenticated as Super Admin."""
+    """Async HTTP client authenticated through the production cookie flow."""
     res = await async_client.post(
         "/api/v1/auth/login",
         json={"email": "admin@hms.local", "password": "Admin@123"},
     )
-    if res.status_code == 200:
-        token = res.json()["access_token"]
-        async_client.headers["Authorization"] = f"Bearer {token}"
+    assert res.status_code == 200, res.text
+    # httpx retains Set-Cookie values on the same client. Do not manufacture an
+    # Authorization header: browser clients use HttpOnly access cookies.
     return async_client

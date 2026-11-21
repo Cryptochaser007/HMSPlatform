@@ -63,8 +63,20 @@ async def login(
     from app.core.redis_state import get_redis
     failed_epoch = await (await get_redis()).get(f"auth:lockout:{credentials.email.strip().lower()}:last_failed")
     from sqlalchemy import text
-    durable_failed = await db.execute(text("SELECT last_failed_login FROM users WHERE id=:uid"), {"uid": str(user.id)})
-    last_failed = durable_failed.scalar_one_or_none()
+    # Vercel deploys application code but does not apply PostgreSQL migrations.
+    # Keep existing users able to sign in until the additive 003 migration has
+    # been run against the attached Supabase database.
+    column_check = await db.execute(text(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+        "WHERE table_name='users' AND column_name='last_failed_login')"
+    ))
+    last_failed = None
+    if column_check.scalar_one():
+        durable_failed = await db.execute(
+            text("SELECT last_failed_login FROM users WHERE id=:uid"),
+            {"uid": str(user.id)},
+        )
+        last_failed = durable_failed.scalar_one_or_none()
     previous_login = getattr(user, "_previous_last_login", None)
     return {
         "authenticated": True,
