@@ -1,5 +1,4 @@
-"""
-Application configuration using Pydantic BaseSettings.
+"""Application configuration using Pydantic BaseSettings.
 Loads values from environment variables and .env file.
 """
 
@@ -34,17 +33,25 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: Any) -> str:
-        """Ensure DATABASE_URL uses the asyncpg driver prefix."""
+        """Ensure DATABASE_URL uses the asyncpg driver prefix and normalizes SSL for Supabase/PgBouncer."""
         # Fallback to standard cloud Postgres environment variables if default was used
         if not v or v == "postgresql+asyncpg://hms:hms_secret@localhost:5432/hms_db":
-            fallback = os.environ.get("POSTGRES_URL") or os.environ.get("POSTGRES_PRISMA_URL") or os.environ.get("POSTGRES_URL_NON_POOLING")
+            fallback = (
+                os.environ.get("DATABASE_URL")
+                or os.environ.get("POSTGRES_URL")
+                or os.environ.get("POSTGRES_PRISMA_URL")
+                or os.environ.get("POSTGRES_URL_NON_POOLING")
+            )
             if fallback:
                 v = fallback
         if isinstance(v, str):
             if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+asyncpg://", 1)
-            if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
-                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+                v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+                v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+            # asyncpg accepts ssl=... rather than sslmode=...
+            if "sslmode=" in v:
+                v = v.replace("sslmode=", "ssl=")
         return v
 
     # ── Redis ────────────────────────────────────────────────────────────
@@ -56,10 +63,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 10080  # 7 days
 
-    # ── Field-level encryption ─────────────────────────────────────────
+    # ── Field-level encryption & Cloud Adapters ──────────────────────────
     ENCRYPTION_KEY: str = "CHANGE_ME_GENERATE_WITH_Fernet.generate_key"
     ENCRYPTION_MASTER_KEY: str = ""
-    CLOUD_PROVIDER: str = "SUPABASE_FREE"
+    CLOUD_PROVIDER: str = "FREE_TIER"  # FREE_TIER (Supabase Storage + Env KEK) vs AWS (S3 + KMS)
 
     # ── ABDM Integration ─────────────────────────────────────────────────
     ABDM_BASE_URL: str = "https://dev.abdm.gov.in/gateway"

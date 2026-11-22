@@ -5,7 +5,7 @@ common columns (id, created_at, updated_at, is_deleted).
 
 import os
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, DateTime, text
@@ -23,8 +23,8 @@ from app.core.config import get_settings
 settings = get_settings()
 
 # Supabase / PgBouncer compatibility: disable prepared statement caching
-# to prevent DuplicatePreparedStatementError in transaction pooling mode
-connect_args = {
+# to prevent DuplicatePreparedStatementError in transaction pooling mode (port 6543)
+connect_args: dict[str, Any] = {
     "statement_cache_size": 0,
 }
 
@@ -37,11 +37,14 @@ if os.environ.get("VERCEL") == "1":
         connect_args=connect_args,
     )
 else:
+    # Persistent container / web service (Render Free Web Service):
+    # Free-tier Render has 512MB RAM; small pool with pre-ping and recycling
+    # prevents stale connection drops across idle spin-downs and Supabase pooler drops.
     engine = create_async_engine(
         settings.DATABASE_URL,
         echo=settings.DEBUG,
-        pool_size=20,
-        max_overflow=10,
+        pool_size=10,
+        max_overflow=5,
         pool_pre_ping=True,
         pool_recycle=300,
         connect_args=connect_args,

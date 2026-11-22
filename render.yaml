@@ -1,0 +1,66 @@
+# Render Blueprint for Stage 2 Free-Tier FastAPI Backend Deployment
+# Deploy to Render as a Free Web Service with Supabase PostgreSQL & Upstash Redis
+services:
+  - type: web
+    name: hms-backend
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend
+    healthCheckPath: /health
+    plan: free
+    region: singapore
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: CLOUD_PROVIDER
+        value: FREE_TIER
+      - key: DATABASE_URL
+        sync: false
+        # Example: postgresql+asyncpg://postgres.[ref]:[password]@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?ssl=require
+      - key: REDIS_URL
+        sync: false
+        # Example: rediss://default:[password]@[endpoint].upstash.io:6379
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: ENCRYPTION_MASTER_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY_VERSION
+        value: "1"
+      - key: SUPABASE_URL
+        sync: false
+        # Example: https://[ref].supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_PRIVATE_BUCKET
+        value: clinical-records
+      - key: CORS_ORIGINS
+        value: '["https://your-hms-frontend.vercel.app", "http://localhost:3000"]'
+      - key: ABDM_ENV
+        value: MOCK
+      - key: ABDM_GATEWAY_URL
+        value: "https://dev.abdm.gov.in"
+      - key: ABDM_ABHA_URL
+        value: "https://abhasbx.abdm.gov.in/abha/api/v3"
+      - key: ABDM_X_CM_ID
+        value: sbx
+      - key: ABDM_CLIENT_ID
+        sync: false
+      - key: ABDM_CLIENT_SECRET
+        sync: false
+      - key: ABDM_BRIDGE_ID
+        sync: false
+      - key: HFR_FACILITY_ID
+        sync: false
+      - key: ABDM_HIP_ID
+        sync: false
+      - key: ABDM_HIU_ID
+        sync: false
+      - key: ABDM_CALLBACK_BASE_URL
+        sync: false
+        # Example: https://hms-backend.onrender.com
