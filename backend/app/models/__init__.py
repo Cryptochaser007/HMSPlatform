@@ -18,11 +18,9 @@ from app.models.abdm import (
     ABDMConsentArtefact,
     ABDMTransactionLog,
 )
-from app.models.tenant import Hospital
 from app.models.registry import HFRFacility, HPRPractitioner, Referral, InsurancePolicy, InsuranceClaim
 
 __all__ = [
-    "Hospital",
     "User",
     "Patient", "Gender",
     "Encounter", "EncounterType", "EncounterStatus", "EncounterPriority",
