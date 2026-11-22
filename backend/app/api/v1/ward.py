@@ -1,8 +1,8 @@
 """Ward management, Bed allocations, and IPD Inpatient Admissions."""
 
-from typing import Any, Dict, List
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
@@ -41,12 +41,12 @@ async def create_ward(
 
 @router.get(
     "/",
-    response_model=List[WardResponse],
+    response_model=list[WardResponse],
     dependencies=[Depends(require_permissions(Permission.ADMISSION_READ.value))],
 )
 async def list_wards(
     db: AsyncSession = Depends(get_db),
-) -> List[WardResponse]:
+) -> list[WardResponse]:
     """List all hospital wards."""
     wards = await ward_service.list_wards(db)
     return [WardResponse.model_validate(w) for w in wards]
@@ -75,7 +75,7 @@ async def update_bed_status(
 )
 async def admit_patient(
     data: AdmissionCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AdmissionResponse:
     """Admit patient to an inpatient bed (IPD intake)."""

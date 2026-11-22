@@ -17,11 +17,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -35,7 +36,7 @@ _B = int("7b425ed097b425ed097b425ed097b425ed097b425ed097b4260b5e9c7710c864", 16)
 _N = int("1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed", 16)
 _GX = int("2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaad245a", 16)
 _GY = int("20ae19a1b8a086b4e01edd2c7748d14c923d4d7e6d7c61b229e9c5a27eced3d9", 16)
-def _point_add(left: Optional[tuple[int, int]], right: Optional[tuple[int, int]]) -> Optional[tuple[int, int]]:
+def _point_add(left: tuple[int, int] | None, right: tuple[int, int] | None) -> tuple[int, int] | None:
     if left is None:
         return right
     if right is None:
@@ -52,12 +53,12 @@ def _point_add(left: Optional[tuple[int, int]], right: Optional[tuple[int, int]]
     return x3, (slope * (x1 - x3) - y1) % _P
 
 
-def _scalar_mult(scalar: int, point: tuple[int, int], allow_infinity: bool = False) -> Optional[tuple[int, int]]:
+def _scalar_mult(scalar: int, point: tuple[int, int], allow_infinity: bool = False) -> tuple[int, int] | None:
     # Short-Weierstrass arithmetic over the BouncyCastle Curve25519 parameters.
     # Python big-integer operations are not constant-time; use a hardened native
     # implementation before treating this module as a production cryptographic boundary.
-    result: Optional[tuple[int, int]] = None
-    addend: Optional[tuple[int, int]] = point
+    result: tuple[int, int] | None = None
+    addend: tuple[int, int] | None = point
     while scalar:
         if scalar & 1:
             result = _point_add(result, addend)
@@ -77,7 +78,7 @@ class FideliusKeyPair:
     nonce_b64: str
     expiry_iso: str
 
-    def to_key_material(self) -> Dict[str, Any]:
+    def to_key_material(self) -> dict[str, Any]:
         """Serialize public key material into ABDM gateway ``keyMaterial`` JSON format."""
         return {
             "cryptoAlg": "ECDH",
@@ -102,7 +103,7 @@ def generate_ephemeral_keypair(ttl_minutes: int = 30) -> FideliusKeyPair:
     # accepted by the decoder for Java callers that send x509PublicKey instead.
     pub_bytes = b"\x04" + public_x.to_bytes(32, "big") + public_y.to_bytes(32, "big")
     nonce_bytes = os.urandom(32)
-    expiry = (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).strftime(
+    expiry = (datetime.now(UTC) + timedelta(minutes=ttl_minutes)).strftime(
         "%Y-%m-%dT%H:%M:%S.%f"
     )[:-3] + "Z"
 
@@ -217,7 +218,7 @@ def _decode_nonce(nonce_str: str) -> bytes:
         if len(decoded) == 32:
             return decoded
     except Exception:
-        pass
+        logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
     # Fallback normalization for non-base64 UUID strings encountered in mock/test payloads
     return hashlib.sha256(nonce_str.encode("utf-8")).digest()
 
@@ -245,8 +246,8 @@ def _derive_aes_key_and_iv(
 
 def encrypt_fhir_bundle(
     plaintext_json: str,
-    receiver_key_material: Dict[str, Any],
-    sender_keypair: Optional[FideliusKeyPair] = None,
+    receiver_key_material: dict[str, Any],
+    sender_keypair: FideliusKeyPair | None = None,
 ) -> tuple[str, FideliusKeyPair]:
     """Encrypt a serialized FHIR R4 JSON bundle using Fidelius ECDH + AES-256-GCM.
 
@@ -278,7 +279,7 @@ def encrypt_fhir_bundle(
 
 def decrypt_fhir_bundle(
     ciphertext_b64: str,
-    sender_key_material: Dict[str, Any],
+    sender_key_material: dict[str, Any],
     receiver_keypair: FideliusKeyPair,
 ) -> str:
     """Decrypt a Fidelius-encrypted FHIR R4 bundle using the HIU's ephemeral private key.
@@ -312,7 +313,7 @@ def decrypt_fhir_bundle(
 
 def verify_nha_webhook_signature(
     payload_bytes: bytes,
-    signature_header: Optional[str],
+    signature_header: str | None,
     shared_secret: str,
     allow_mock_bypass: bool = False,
 ) -> bool:
@@ -330,7 +331,6 @@ def verify_nha_webhook_signature(
         shared_secret.encode("utf-8"), payload_bytes, hashlib.sha256
     ).hexdigest()
     provided = signature_header.strip()
-    if provided.startswith("sha256="):
-        provided = provided[7:]
+    provided = provided.removeprefix("sha256=")
     return hmac.compare_digest(expected.lower(), provided.lower())
 

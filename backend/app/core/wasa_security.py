@@ -17,7 +17,6 @@ import re
 from typing import Any
 
 from fastapi import Request, Response
-from fastapi import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 # Sensitive keys whose values must ALWAYS be fully redacted in logs / audit summaries
@@ -197,10 +196,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
 
         path = request.url.path
-        if path.startswith("/docs") or path.startswith("/redoc"):
+        if path.startswith(("/docs", "/redoc")):
             response.headers["Content-Security-Policy"] = self.DOCS_CSP
         else:
-            response.headers["Content-Security-Policy"] = self.STRICT_CSP
+            from app.core.config import get_settings
+            csp = self.STRICT_CSP
+            if get_settings().ENVIRONMENT.lower() == "development":
+                csp = csp.replace("connect-src 'self' https:", "connect-src 'self' https: http://localhost:*")
+            response.headers["Content-Security-Policy"] = csp
 
         if path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"

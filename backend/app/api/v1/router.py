@@ -2,7 +2,9 @@
 
 from fastapi import APIRouter, Depends
 
-from app.abdm.callbacks import router as abdm_callbacks_router, verify_gateway_callback_request
+from app.abdm.callbacks import router as abdm_callbacks_router
+from app.abdm.callbacks import verify_gateway_callback_request
+from app.api.v1.abdm import public_router as abdm_public_router
 from app.api.v1.abdm import router as abdm_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.billing import router as billing_router
@@ -14,9 +16,12 @@ from app.api.v1.pharmacy import router as pharmacy_router
 from app.api.v1.quality import router as quality_router
 from app.api.v1.radiology import router as radiology_router
 from app.api.v1.registry import router as registry_router
+from app.api.v1.tenants import router as tenant_router
 from app.api.v1.ward import router as ward_router
 
 api_router = APIRouter()
+api_router.include_router(abdm_public_router)
+api_router.include_router(tenant_router)
 
 # Authentication & Staff Management
 api_router.include_router(auth_router)

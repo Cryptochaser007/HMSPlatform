@@ -1,9 +1,6 @@
 """Unit & integration tests for ABDM v3 Sandbox Exit (M1/M2/M3) and CERT-In WASA controls."""
 
 import json
-import os
-
-from fastapi.testclient import TestClient
 
 from app.abdm.client import ABDMClient, LiveABDMAdapter, MockABDMAdapter
 from app.abdm.config import ABDMMode, ABDMSettings
@@ -30,6 +27,7 @@ from app.utils.fhir import (
     build_prescription_bundle,
     parse_fhir_bundle_to_timeline,
 )
+from fastapi.testclient import TestClient
 
 
 def test_fidelius_ecdh_curve25519_aes_gcm_roundtrip():

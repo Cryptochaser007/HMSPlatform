@@ -6,7 +6,6 @@ entire HMS platform.
 """
 
 from enum import Enum
-from typing import List, Set
 
 
 class Role(str, Enum):
@@ -105,7 +104,7 @@ class Permission(str, Enum):
 
 # ── Role → Permissions mapping ───────────────────────────────────────────
 
-ROLE_PERMISSIONS: dict[Role, Set[Permission]] = {
+ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
     Role.SUPER_ADMIN: set(Permission),  # all permissions
 
     Role.HOSPITAL_ADMIN: {
@@ -224,7 +223,7 @@ def has_permission(role: Role, permission: Permission) -> bool:
     return permission in role_perms
 
 
-def has_any_permission(role: Role, permissions: List[Permission]) -> bool:
+def has_any_permission(role: Role, permissions: list[Permission]) -> bool:
     """Return True if *role* includes **at least one** of *permissions*."""
     role_perms = ROLE_PERMISSIONS.get(role)
     if role_perms is None:

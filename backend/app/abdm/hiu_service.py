@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, select
@@ -31,6 +31,7 @@ from app.abdm.fidelius import (
     generate_ephemeral_keypair,
     verify_nha_webhook_signature,
 )
+from app.core.tenant_context import tenant_cache_key
 from app.utils.fhir import (
     build_condition_resource,
     build_diagnostic_report_bundle,
@@ -50,7 +51,7 @@ logger = logging.getLogger("abdm.hiu")
 
 # Ephemeral keypair store (transaction_id -> (FideliusKeyPair, patient_abha))
 # Decrypted longitudinal timeline is intentionally request-local only in this demo.
-_longitudinal_records: Dict[str, List[Dict[str, Any]]] = {}
+_longitudinal_records: dict[str, list[dict[str, Any]]] = {}
 PURPOSES = {
     "CAREMGT": "Care Management", "BTG": "Break the Glass", "PUBHLTH": "Public Health",
     "HPAYMT": "Healthcare Payment", "DSRCH": "Disease Surveillance", "PATRQT": "Patient Request",
@@ -61,10 +62,10 @@ class ConsentRequest(BaseModel):
     patient_abha: str = Field(..., min_length=4, max_length=255)
     purpose: str = Field(default="Care Management", max_length=200)
     purpose_code: str = Field(default="CAREMGT", max_length=30)
-    purpose_ref_uri: Optional[str] = Field(default=None, max_length=500)
+    purpose_ref_uri: str | None = Field(default=None, max_length=500)
     date_from: datetime
     date_to: datetime
-    hi_types: List[str] = Field(
+    hi_types: list[str] = Field(
         default=["OPConsultation", "Prescription", "DiagnosticReport", "DischargeSummary"]
     )
 
@@ -80,19 +81,19 @@ class ConsentRequest(BaseModel):
 class ConsentNotification(BaseModel):
     consent_request_id: str
     status: str  # GRANTED, DENIED, REVOKED, EXPIRED
-    consent_artefact_id: Optional[str] = None
-    signature: Optional[str] = None
+    consent_artefact_id: str | None = None
+    signature: str | None = None
 
 
 class HealthData(BaseModel):
     care_context_reference: str
-    bundle_data: Dict[str, Any]
+    bundle_data: dict[str, Any]
 
 
 class HIUService:
     """Health Information User (HIU) orchestrator for ABDM M3 certification."""
 
-    def __init__(self, client: Optional[ABDMClient] = None) -> None:
+    def __init__(self, client: ABDMClient | None = None) -> None:
         self.settings = get_abdm_settings()
         self.client = client or ABDMClient()
 
@@ -107,10 +108,10 @@ class HIUService:
         *,
         requester_name: str = "Consulting Physician",
         requester_reg: str = "NMC-2018-94021",
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         request_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         erase_at = now + timedelta(days=30)
 
         purpose_code = request.purpose_code.upper()
@@ -179,7 +180,6 @@ class HIUService:
             "abdm_mode": self.client.mode.value,
             "created_at": now.isoformat(),
         }
-        row = None
         try:
             from app.models.abdm import ABDMConsentArtefact
 
@@ -225,10 +225,10 @@ class HIUService:
     async def on_consent_hiu_notify(
         self,
         db: AsyncSession,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         raw_body: bytes,
-        signature_header: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        signature_header: str | None = None,
+    ) -> dict[str, Any]:
         req_id = payload.get("requestId") or str(uuid.uuid4())
         notification = payload.get("notification") or {}
         consent_req_id = notification.get("consentRequestId") or ""
@@ -281,6 +281,7 @@ class HIUService:
                 row.artefact_payload = {"notification": notification, "signed_artefacts": artefacts}
                 await db.flush()
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("HIU consent notify DB update fallback: %s", exc)
 
         gateway_ack = None
@@ -324,8 +325,8 @@ class HIUService:
         db: AsyncSession,
         consent_artefact_id: str,
         *,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         consent = await self._find_hiu_consent(db, consent_artefact_id)
         if not consent:
             raise ABDMError(
@@ -406,8 +407,8 @@ class HIUService:
     # ------------------------------------------------------------------
 
     async def on_health_information_transfer(
-        self, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         txn_id = payload.get("transactionId") or ""
         entries = payload.get("entries") or []
         sender_key_material = payload.get("keyMaterial") or {}
@@ -435,7 +436,7 @@ class HIUService:
 
         hiu_keypair = FideliusKeyPair(**{k: stored[k] for k in ("private_key_b64", "public_key_b64", "nonce_b64", "expiry_iso")})
         patient_abha = stored["patient_abha"]
-        timeline_items: List[Dict[str, Any]] = []
+        timeline_items: list[dict[str, Any]] = []
 
         for entry in entries:
             ciphertext_b64 = entry.get("content") or ""
@@ -464,12 +465,12 @@ class HIUService:
             correlation_id=txn_id,
         )
 
-        existing = _longitudinal_records.get(patient_abha, [])
+        existing = _longitudinal_records.get(tenant_cache_key(patient_abha), [])
         existing_ids = {item["bundle_id"] for item in existing}
         for item in timeline_items:
             if item["bundle_id"] not in existing_ids:
                 existing.insert(0, item)
-        _longitudinal_records[patient_abha] = existing
+        _longitudinal_records[tenant_cache_key(patient_abha)] = existing
         await (await get_redis()).delete(f"abdm:hiu:key:{txn_id}")
 
         return {
@@ -485,16 +486,16 @@ class HIUService:
     # ------------------------------------------------------------------
 
     async def list_consents(
-        self, db: AsyncSession, patient_abha: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
+        self, db: AsyncSession, patient_abha: str | None = None
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
         seen: set[str] = set()
         try:
             from app.models.abdm import ABDMConsentArtefact
 
             q = select(ABDMConsentArtefact).where(
                 ABDMConsentArtefact.role == "HIU",
-                ABDMConsentArtefact.is_deleted == False,  # noqa: E712
+                ABDMConsentArtefact.is_deleted == False,
             )
             if patient_abha:
                 q = q.where(ABDMConsentArtefact.patient_abha == patient_abha)
@@ -517,16 +518,16 @@ class HIUService:
                     }
                 )
         except Exception:
-            pass
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
 
         return results
 
-    def get_longitudinal_records(self, patient_abha: str) -> List[Dict[str, Any]]:
-        return _longitudinal_records.get(patient_abha.strip(), [])
+    def get_longitudinal_records(self, patient_abha: str) -> list[dict[str, Any]]:
+        return _longitudinal_records.get(tenant_cache_key(patient_abha.strip()), [])
 
     async def _find_hiu_consent(
         self, db: AsyncSession, consent_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         try:
             from app.models.abdm import ABDMConsentArtefact
 
@@ -547,7 +548,7 @@ class HIUService:
                     "hi_types": row.hi_types,
                 }
         except Exception:
-            pass
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         return None
 
     def _build_fidelius_encrypted_mock_push(
@@ -555,8 +556,8 @@ class HIUService:
         *,
         txn_id: str,
         patient_abha: str,
-        hiu_key_material: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        hiu_key_material: dict[str, Any],
+    ) -> dict[str, Any]:
         """Build 3 NRCeS FHIR R4 Bundles from external HIPs and encrypt with real Fidelius ECDH+AES-GCM."""
         pat = build_patient_resource(
             patient_id="pat-ext-001",

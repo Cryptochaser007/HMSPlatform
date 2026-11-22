@@ -1,6 +1,7 @@
 """ABDM Health Facility Registry (HFR) integration service."""
 
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -13,15 +14,15 @@ class HFRProfile(BaseModel):
     facility_type: str
     address: str
     ownership: str  # PUBLIC / PRIVATE
-    specialities: List[str] = []
-    services: List[str] = []
+    specialities: list[str] = []
+    services: list[str] = []
     is_active: bool = True
 
 
 class HFRService:
     """Health Facility Registry integration and hospital profile management."""
 
-    def __init__(self, client: Optional[ABDMClient] = None) -> None:
+    def __init__(self, client: ABDMClient | None = None) -> None:
         self.client = client or ABDMClient()
 
     async def get_facility_profile(self, facility_id: str) -> HFRProfile:
@@ -41,6 +42,7 @@ class HFRService:
                 services=["OPD", "IPD", "ICU", "Diagnostics", "Pharmacy", "Radiology"],
             )
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             return HFRProfile(
                 facility_id=facility_id,
                 name="NABH Certified Multi-Speciality Hospital",
@@ -51,7 +53,7 @@ class HFRService:
                 services=["OPD", "IPD", "Emergency", "Laboratory", "Radiology", "Pharmacy"],
             )
 
-    async def register_facility(self, facility_data: Dict[str, Any]) -> str:
+    async def register_facility(self, facility_data: dict[str, Any]) -> str:
         """Submit hospital registration to HFR."""
         return facility_data.get("facility_id", "IN0710000012")
 

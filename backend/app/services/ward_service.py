@@ -1,7 +1,6 @@
 """Ward, Bed and IPD Admission service."""
 
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -40,9 +39,9 @@ class WardService:
         await db.refresh(ward)
         return ward
 
-    async def list_wards(self, db: AsyncSession) -> List[Ward]:
+    async def list_wards(self, db: AsyncSession) -> list[Ward]:
         result = await db.execute(
-            select(Ward).options(selectinload(Ward.beds)).where(Ward.is_deleted == False)  # noqa: E712
+            select(Ward).options(selectinload(Ward.beds)).where(Ward.is_deleted == False)
         )
         return list(result.scalars().all())
 
@@ -71,7 +70,7 @@ class WardService:
             patient_id=data.patient_id,
             bed_id=data.bed_id,
             admitted_by=admitted_by,
-            admission_date=datetime.now(timezone.utc),
+            admission_date=datetime.now(UTC),
             expected_discharge=data.expected_discharge,
             status=AdmissionStatus.ADMITTED,
         )
@@ -124,7 +123,7 @@ class WardService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active admission not found")
 
         admission.status = AdmissionStatus.DISCHARGED
-        admission.actual_discharge = datetime.now(timezone.utc)
+        admission.actual_discharge = datetime.now(UTC)
         admission.discharge_type = DischargeType(data.discharge_type)
 
         # Free bed
@@ -138,7 +137,7 @@ class WardService:
         encounter = enc_res.scalar_one_or_none()
         if encounter:
             encounter.status = EncounterStatus.DISCHARGED
-            encounter.end_time = datetime.now(timezone.utc)
+            encounter.end_time = datetime.now(UTC)
 
         await db.flush()
         return admission

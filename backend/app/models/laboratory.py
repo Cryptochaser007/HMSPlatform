@@ -1,13 +1,14 @@
 """Laboratory models: LabTest, LabOrder, LabResult."""
 
 import enum
-from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from app.core.database import Base, TenantOwned
 
 
 class LabOrderStatus(str, enum.Enum):
@@ -32,18 +33,18 @@ class ResultFlag(str, enum.Enum):
     CRITICAL = "CRITICAL"
 
 
-class LabTest(Base):
+class LabTest(TenantOwned, Base):
     __tablename__ = "lab_tests"
 
-    name = Column(String(255), nullable=False)
-    code = Column(String(50), unique=True, nullable=False, index=True)
-    category = Column(String(100), nullable=False)  # Hematology, Biochemistry, etc.
-    sample_type = Column(String(100), nullable=False)  # Blood, Urine, Stool, etc.
-    description = Column(Text, nullable=True)
-    reference_ranges = Column(JSONB, nullable=True)  # {"male": {"18-60": {"min": 4.5, "max": 5.5, "unit": "million/μL"}}}
-    turnaround_hours = Column(Integer, default=24, nullable=False)
-    price = Column(Numeric(10, 2), nullable=False)
-    is_active = Column(Boolean, default=True, server_default="TRUE")
+    name: Mapped[Any] = mapped_column(String(255), nullable=False)
+    code: Mapped[Any] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    category: Mapped[Any] = mapped_column(String(100), nullable=False)  # Hematology, Biochemistry, etc.
+    sample_type: Mapped[Any] = mapped_column(String(100), nullable=False)  # Blood, Urine, Stool, etc.
+    description: Mapped[Any] = mapped_column(Text, nullable=True)
+    reference_ranges: Mapped[Any] = mapped_column(JSONB, nullable=True)  # {"male": {"18-60": {"min": 4.5, "max": 5.5, "unit": "million/μL"}}}
+    turnaround_hours: Mapped[Any] = mapped_column(Integer, default=24, nullable=False)
+    price: Mapped[Any] = mapped_column(Numeric(10, 2), nullable=False)
+    is_active: Mapped[Any] = mapped_column(Boolean, default=True, server_default="TRUE")
 
     # Relationships
     orders = relationship("LabOrder", back_populates="test", lazy="dynamic")
@@ -52,27 +53,27 @@ class LabTest(Base):
         return f"<LabTest {self.code} - {self.name}>"
 
 
-class LabOrder(Base):
+class LabOrder(TenantOwned, Base):
     __tablename__ = "lab_orders"
 
-    encounter_id = Column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=False, index=True)
-    patient_id = Column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
-    ordered_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
-    test_id = Column(UUID(as_uuid=False), ForeignKey("lab_tests.id"), nullable=False)
-    status = Column(
+    encounter_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=False, index=True)
+    patient_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
+    ordered_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    test_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("lab_tests.id"), nullable=False)
+    status: Mapped[Any] = mapped_column(
         SAEnum(LabOrderStatus, name="lab_order_status_enum"),
         nullable=False,
         default=LabOrderStatus.ORDERED,
     )
-    priority = Column(
+    priority: Mapped[Any] = mapped_column(
         SAEnum(LabPriority, name="lab_priority_enum"),
         nullable=False,
         default=LabPriority.ROUTINE,
     )
-    clinical_notes = Column(Text, nullable=True)
-    sample_id = Column(String(50), nullable=True, unique=True)  # Barcode
-    collected_at = Column(DateTime(timezone=True), nullable=True)
-    collected_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    clinical_notes: Mapped[Any] = mapped_column(Text, nullable=True)
+    sample_id: Mapped[Any] = mapped_column(String(50), nullable=True, unique=True)  # Barcode
+    collected_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=True)
+    collected_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
 
     # Relationships
     encounter = relationship("Encounter", back_populates="lab_orders")
@@ -86,21 +87,21 @@ class LabOrder(Base):
         return f"<LabOrder {self.id} status={self.status}>"
 
 
-class LabResult(Base):
+class LabResult(TenantOwned, Base):
     __tablename__ = "lab_results"
 
-    order_id = Column(UUID(as_uuid=False), ForeignKey("lab_orders.id"), nullable=False, index=True)
-    parameter_name = Column(String(255), nullable=False)
-    value = Column(String(100), nullable=False)
-    unit = Column(String(50), nullable=True)
-    reference_range = Column(String(100), nullable=True)
-    is_abnormal = Column(Boolean, default=False, server_default="FALSE")
-    flag = Column(SAEnum(ResultFlag, name="result_flag_enum"), nullable=True)
-    performed_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
-    verified_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
-    verified_at = Column(DateTime(timezone=True), nullable=True)
-    remarks = Column(Text, nullable=True)
-    attachments = Column(JSONB, nullable=True)
+    order_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("lab_orders.id"), nullable=False, index=True)
+    parameter_name: Mapped[Any] = mapped_column(String(255), nullable=False)
+    value: Mapped[Any] = mapped_column(String(100), nullable=False)
+    unit: Mapped[Any] = mapped_column(String(50), nullable=True)
+    reference_range: Mapped[Any] = mapped_column(String(100), nullable=True)
+    is_abnormal: Mapped[Any] = mapped_column(Boolean, default=False, server_default="FALSE")
+    flag: Mapped[Any] = mapped_column(SAEnum(ResultFlag, name="result_flag_enum"), nullable=True)
+    performed_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    verified_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    verified_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=True)
+    remarks: Mapped[Any] = mapped_column(Text, nullable=True)
+    attachments: Mapped[Any] = mapped_column(JSONB, nullable=True)
 
     # Relationships
     order = relationship("LabOrder", back_populates="results")

@@ -2,7 +2,6 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,7 +41,7 @@ class QualityMeasurementCreate(BaseModel):
     period_end: date
     numerator_value: Decimal = Field(..., ge=0)
     denominator_value: Decimal = Field(..., gt=0)
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class QualityMeasurementResponse(BaseModel):
@@ -55,7 +54,7 @@ class QualityMeasurementResponse(BaseModel):
     denominator_value: Decimal
     calculated_value: Decimal
     recorded_by: str
-    notes: Optional[str] = None
+    notes: str | None = None
     created_at: datetime
 
 
@@ -66,13 +65,13 @@ class IncidentReportCreate(BaseModel):
     description: str
     location: str
     incident_date: datetime
-    patient_id: Optional[str] = None
+    patient_id: str | None = None
 
 
 class IncidentReportUpdate(BaseModel):
-    root_cause: Optional[str] = None
-    corrective_action: Optional[str] = None
-    status: Optional[str] = None
+    root_cause: str | None = None
+    corrective_action: str | None = None
+    status: str | None = None
 
 
 class IncidentReportResponse(BaseModel):
@@ -86,12 +85,12 @@ class IncidentReportResponse(BaseModel):
     location: str
     incident_date: datetime
     reported_by: str
-    patient_id: Optional[str] = None
-    root_cause: Optional[str] = None
-    corrective_action: Optional[str] = None
+    patient_id: str | None = None
+    root_cause: str | None = None
+    corrective_action: str | None = None
     status: str
-    closed_by: Optional[str] = None
-    closed_at: Optional[datetime] = None
+    closed_by: str | None = None
+    closed_at: datetime | None = None
     created_at: datetime
 
 
@@ -100,5 +99,5 @@ class NABHDashboard(BaseModel):
     compliant: int
     non_compliant: int
     compliance_rate: float
-    indicators: List[dict]
+    indicators: list[dict]
 

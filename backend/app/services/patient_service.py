@@ -1,13 +1,12 @@
 """Patient service: registration, search, DPDP-compliant operations."""
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.encryption import encrypt_field, hash_field
+from app.core.encryption import hash_field
 from app.models.patient import Patient
 from app.schemas.patient import PatientCreate, PatientSearchParams, PatientUpdate
 from app.utils.helpers import generate_uhid
@@ -20,7 +19,7 @@ class PatientService:
         # Check duplicate ABHA ID
         if data.abha_id:
             result = await db.execute(
-                select(Patient).where(Patient.abha_id == data.abha_id, Patient.is_deleted == False)  # noqa: E712
+                select(Patient).where(Patient.abha_id == data.abha_id, Patient.is_deleted == False)
             )
             if result.scalar_one_or_none():
                 raise HTTPException(
@@ -67,7 +66,7 @@ class PatientService:
 
     async def get_patient(self, db: AsyncSession, patient_id: str) -> Patient:
         result = await db.execute(
-            select(Patient).where(Patient.id == patient_id, Patient.is_deleted == False)  # noqa: E712
+            select(Patient).where(Patient.id == patient_id, Patient.is_deleted == False)
         )
         patient = result.scalar_one_or_none()
         if patient is None:
@@ -81,7 +80,7 @@ class PatientService:
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
-        query = select(Patient).where(Patient.is_deleted == False)  # noqa: E712
+        query = select(Patient).where(Patient.is_deleted == False)
 
         if params.registration_number:
             query = query.where(Patient.registration_number == params.registration_number)
@@ -89,7 +88,7 @@ class PatientService:
             query = query.where(Patient.abha_id == params.abha_id)
         elif params.phone:
             # Search by phone hash
-            phone_hash = hash_field(params.phone)
+            hash_field(params.phone)
             # Since phone is encrypted, we can't directly search. Use name_search_hash approach
             # For MVP, we search by other indexed fields
             query = query.where(Patient.registration_number.ilike(f"%{params.phone}%"))
@@ -131,7 +130,7 @@ class PatientService:
                 f"{patient.first_name} {patient.last_name}"
             )
 
-        patient.updated_at = datetime.now(timezone.utc)
+        patient.updated_at = datetime.now(UTC)
         await db.flush()
         await db.refresh(patient)
         return patient

@@ -1,7 +1,5 @@
 """Clinical service: notes, prescriptions, vitals, patient history."""
 
-from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -49,7 +47,7 @@ class ClinicalService:
             select(ClinicalNote)
             .where(
                 ClinicalNote.encounter_id == encounter_id,
-                ClinicalNote.is_deleted == False,  # noqa: E712
+                ClinicalNote.is_deleted == False,
             )
             .order_by(ClinicalNote.created_at.desc())
         )
@@ -127,7 +125,7 @@ class ClinicalService:
             .options(selectinload(Prescription.items))
             .where(
                 Prescription.encounter_id == encounter_id,
-                Prescription.is_deleted == False,  # noqa: E712
+                Prescription.is_deleted == False,
             )
             .order_by(Prescription.created_at.desc())
         )
@@ -163,7 +161,7 @@ class ClinicalService:
         # Get all encounters
         enc_result = await db.execute(
             select(Encounter)
-            .where(Encounter.patient_id == patient_id, Encounter.is_deleted == False)  # noqa: E712
+            .where(Encounter.patient_id == patient_id, Encounter.is_deleted == False)
             .order_by(Encounter.created_at.desc())
         )
         encounters = list(enc_result.scalars().all())

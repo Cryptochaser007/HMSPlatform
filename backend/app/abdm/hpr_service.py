@@ -1,6 +1,6 @@
 """ABDM Healthcare Professional Registry (HPR) verification service."""
 
-from typing import List, Optional
+import logging
 import uuid
 
 from pydantic import BaseModel
@@ -15,14 +15,14 @@ class HPRProfile(BaseModel):
     council: str
     qualification: str
     speciality: str
-    contact: Optional[str] = None
+    contact: str | None = None
     is_verified: bool = False
 
 
 class HPRService:
     """Healthcare Professional Registry lookup and verification."""
 
-    def __init__(self, client: Optional[ABDMClient] = None) -> None:
+    def __init__(self, client: ABDMClient | None = None) -> None:
         self.client = client or ABDMClient()
 
     async def verify_doctor(self, registration_number: str, council: str) -> HPRProfile:
@@ -43,6 +43,7 @@ class HPRService:
                 is_verified=True,
             )
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             # Fallback simulator for offline dev/test
             return HPRProfile(
                 hpr_id=f"HPR-{registration_number}",
@@ -54,7 +55,7 @@ class HPRService:
                 is_verified=True,
             )
 
-    async def search_professional(self, query: str) -> List[HPRProfile]:
+    async def search_professional(self, query: str) -> list[HPRProfile]:
         """Search medical practitioners in HPR by name or registration number."""
         return [
             HPRProfile(

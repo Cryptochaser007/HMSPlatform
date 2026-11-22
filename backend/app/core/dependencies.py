@@ -8,16 +8,15 @@ Common FastAPI dependencies re-exported for convenience.
 - Request ID middleware
 """
 
-from collections import defaultdict, deque
+import logging
 import os
 import time
-from typing import Any, Deque, Dict, Optional
+from collections import defaultdict, deque
 from uuid import uuid4
 
-from fastapi import Depends, HTTPException, Query, Request, Response, status
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-
 import redis.asyncio as aioredis
+from fastapi import HTTPException, Query, Request, Response, status
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from app.core.config import get_settings
 from app.core.database import get_db as get_database_session
@@ -53,16 +52,17 @@ async def get_pagination(
 
 # ── Rate limiter ─────────────────────────────────────────────────────────
 
-_redis_pool: Optional[aioredis.Redis] = None
+_redis_pool: aioredis.Redis | None = None
 
 
-async def _get_rate_limit_redis() -> Optional[aioredis.Redis]:
+async def _get_rate_limit_redis() -> aioredis.Redis | None:
     global _redis_pool
     if _redis_pool is not None:
         try:
             await _redis_pool.ping()
             return _redis_pool
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             _redis_pool = None
 
     redis_url = getattr(settings, "REDIS_URL", "")
@@ -80,10 +80,11 @@ async def _get_rate_limit_redis() -> Optional[aioredis.Redis]:
         _redis_pool = client
         return _redis_pool
     except Exception:
+        logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         return None
 
 
-_memory_rate_buckets: Dict[str, Deque[float]] = defaultdict(deque)
+_memory_rate_buckets: dict[str, deque[float]] = defaultdict(deque)
 
 
 class RateLimiter:
@@ -98,8 +99,9 @@ class RateLimiter:
         self.seconds = seconds
 
     async def __call__(self, request: Request) -> None:
-        forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        client_ip = forwarded_for or (request.client.host if request.client else "unknown")
+        # The ASGI server resolves trusted proxy headers. Raw client-supplied
+        # X-Forwarded-For must not let callers reset their rate-limit bucket.
+        client_ip = request.client.host if request.client else "unknown"
         path = request.url.path
         key = f"rl:{client_ip}:{path}"
 
@@ -119,6 +121,7 @@ class RateLimiter:
         except HTTPException:
             raise
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             # Fail-closed with per-process sliding-window fallback
             now = time.monotonic()
             cutoff = now - self.seconds

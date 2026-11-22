@@ -2,12 +2,14 @@
 
 import enum
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Enum as SAEnum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from app.core.database import Base, TenantOwned
 
 
 class WardType(str, enum.Enum):
@@ -50,15 +52,15 @@ class AdmissionStatus(str, enum.Enum):
     TRANSFERRED = "TRANSFERRED"
 
 
-class Ward(Base):
+class Ward(TenantOwned, Base):
     __tablename__ = "wards"
 
-    name = Column(String(100), nullable=False)
-    ward_type = Column(SAEnum(WardType, name="ward_type_enum"), nullable=False)
-    floor = Column(Integer, nullable=False)
-    total_beds = Column(Integer, nullable=False)
-    department = Column(String(100), nullable=True)
-    is_active = Column(Boolean, default=True, server_default="TRUE")
+    name: Mapped[Any] = mapped_column(String(100), nullable=False)
+    ward_type: Mapped[Any] = mapped_column(SAEnum(WardType, name="ward_type_enum"), nullable=False)
+    floor: Mapped[Any] = mapped_column(Integer, nullable=False)
+    total_beds: Mapped[Any] = mapped_column(Integer, nullable=False)
+    department: Mapped[Any] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[Any] = mapped_column(Boolean, default=True, server_default="TRUE")
 
     # Relationships
     beds = relationship("Bed", back_populates="ward", cascade="all, delete-orphan")
@@ -67,18 +69,18 @@ class Ward(Base):
         return f"<Ward {self.name} type={self.ward_type}>"
 
 
-class Bed(Base):
+class Bed(TenantOwned, Base):
     __tablename__ = "beds"
 
-    ward_id = Column(UUID(as_uuid=False), ForeignKey("wards.id"), nullable=False, index=True)
-    bed_number = Column(String(20), nullable=False)
-    status = Column(
+    ward_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("wards.id"), nullable=False, index=True)
+    bed_number: Mapped[Any] = mapped_column(String(20), nullable=False)
+    status: Mapped[Any] = mapped_column(
         SAEnum(BedStatus, name="bed_status_enum"),
         nullable=False,
         default=BedStatus.AVAILABLE,
     )
-    bed_type = Column(SAEnum(BedType, name="bed_type_enum"), nullable=False, default=BedType.REGULAR)
-    daily_charge = Column(Numeric(10, 2), nullable=False, default=Decimal("500.00"))
+    bed_type: Mapped[Any] = mapped_column(SAEnum(BedType, name="bed_type_enum"), nullable=False, default=BedType.REGULAR)
+    daily_charge: Mapped[Any] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal("500.00"))
 
     # Relationships
     ward = relationship("Ward", back_populates="beds")
@@ -88,19 +90,19 @@ class Bed(Base):
         return f"<Bed {self.bed_number} status={self.status}>"
 
 
-class Admission(Base):
+class Admission(TenantOwned, Base):
     __tablename__ = "admissions"
 
-    encounter_id = Column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=False, index=True)
-    patient_id = Column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
-    bed_id = Column(UUID(as_uuid=False), ForeignKey("beds.id"), nullable=False)
-    admitted_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
-    admission_date = Column(DateTime(timezone=True), nullable=False)
-    expected_discharge = Column(Date, nullable=True)
-    actual_discharge = Column(DateTime(timezone=True), nullable=True)
-    discharge_type = Column(SAEnum(DischargeType, name="discharge_type_enum"), nullable=True)
-    discharge_summary_id = Column(UUID(as_uuid=False), ForeignKey("clinical_notes.id"), nullable=True)
-    status = Column(
+    encounter_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=False, index=True)
+    patient_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
+    bed_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("beds.id"), nullable=False)
+    admitted_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    admission_date: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=False)
+    expected_discharge: Mapped[Any] = mapped_column(Date, nullable=True)
+    actual_discharge: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=True)
+    discharge_type: Mapped[Any] = mapped_column(SAEnum(DischargeType, name="discharge_type_enum"), nullable=True)
+    discharge_summary_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("clinical_notes.id"), nullable=True)
+    status: Mapped[Any] = mapped_column(
         SAEnum(AdmissionStatus, name="admission_status_enum"),
         nullable=False,
         default=AdmissionStatus.ADMITTED,

@@ -1,8 +1,8 @@
 """Pharmacy, Drug Inventory, and Dispensing endpoints."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
@@ -18,7 +18,6 @@ from app.schemas.pharmacy import (
     DrugInventoryCreate,
     DrugInventoryResponse,
     DrugResponse,
-    DrugUpdate,
     StockAlertResponse,
 )
 from app.services.pharmacy_service import pharmacy_service
@@ -46,12 +45,12 @@ async def add_drug(
     dependencies=[Depends(require_permissions(Permission.DRUG_INVENTORY_READ.value))],
 )
 async def search_drugs(
-    name: Optional[str] = Query(None),
-    generic_name: Optional[str] = Query(None),
-    drug_type: Optional[str] = Query(None),
+    name: str | None = Query(None),
+    generic_name: str | None = Query(None),
+    drug_type: str | None = Query(None),
     pagination: PaginationParams = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Search medications by brand name, generic name, or dosage form."""
     res = await pharmacy_service.search_drugs(
         db,
@@ -92,7 +91,7 @@ async def add_inventory_batch(
 async def dispense_medication(
     data: DispensingCreate,
     patient_id: str = Query(...),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DispensingResponse:
     """Dispense medication against prescription, deducting inventory."""
@@ -114,12 +113,12 @@ async def dispense_medication(
 
 @router.get(
     "/pending",
-    response_model=List[PrescriptionResponse],
+    response_model=list[PrescriptionResponse],
     dependencies=[Depends(require_permissions(Permission.PRESCRIPTION_READ.value))],
 )
 async def get_pending_prescriptions(
     db: AsyncSession = Depends(get_db),
-) -> List[PrescriptionResponse]:
+) -> list[PrescriptionResponse]:
     """List signed prescriptions waiting for pharmacy fulfillment."""
     prescriptions = await pharmacy_service.get_pending_prescriptions(db)
     return [PrescriptionResponse.model_validate(p) for p in prescriptions]
@@ -127,12 +126,12 @@ async def get_pending_prescriptions(
 
 @router.get(
     "/alerts/stock",
-    response_model=List[StockAlertResponse],
+    response_model=list[StockAlertResponse],
     dependencies=[Depends(require_permissions(Permission.DRUG_INVENTORY_READ.value))],
 )
 async def get_stock_alerts(
     db: AsyncSession = Depends(get_db),
-) -> List[StockAlertResponse]:
+) -> list[StockAlertResponse]:
     """Alerts for medications that have fallen below their reorder threshold."""
     alerts = await pharmacy_service.get_stock_alerts(db)
     return [StockAlertResponse(**a) for a in alerts]
@@ -145,7 +144,7 @@ async def get_stock_alerts(
 async def get_expiry_alerts(
     days: int = Query(90, description="Days to expiry"),
     db: AsyncSession = Depends(get_db),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Alerts for drug batches expiring within the specified window (default 90 days)."""
     return await pharmacy_service.get_expiry_alerts(db, days=days)
 

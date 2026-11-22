@@ -1,8 +1,7 @@
 """Quality, NABH compliance indicators, and clinical incident reporting."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -37,9 +36,9 @@ class QualityService:
         await db.refresh(indicator)
         return indicator
 
-    async def list_indicators(self, db: AsyncSession) -> List[QualityIndicator]:
+    async def list_indicators(self, db: AsyncSession) -> list[QualityIndicator]:
         result = await db.execute(
-            select(QualityIndicator).where(QualityIndicator.is_deleted == False, QualityIndicator.is_active == True)  # noqa: E712
+            select(QualityIndicator).where(QualityIndicator.is_deleted == False, QualityIndicator.is_active == True)
         )
         return list(result.scalars().all())
 
@@ -48,7 +47,7 @@ class QualityService:
     ) -> QualityMeasurement:
         num = Decimal(str(data.numerator_value))
         den = Decimal(str(data.denominator_value))
-        calculated = (num / den) * Decimal("100.00") if den > Decimal("0") else Decimal("0.00")
+        calculated = (num / den) * Decimal("100.00") if den > Decimal(0) else Decimal("0.00")
 
         measurement = QualityMeasurement(
             indicator_id=data.indicator_id,
@@ -137,9 +136,9 @@ class QualityService:
         db: AsyncSession,
         page: int = 1,
         page_size: int = 20,
-        status_filter: Optional[str] = None,
+        status_filter: str | None = None,
     ) -> dict:
-        query = select(IncidentReport).where(IncidentReport.is_deleted == False)  # noqa: E712
+        query = select(IncidentReport).where(IncidentReport.is_deleted == False)
         if status_filter:
             query = query.where(IncidentReport.status == status_filter)
 
@@ -166,7 +165,7 @@ class QualityService:
             incident.status = IncidentStatus(data.status)
             if data.status == IncidentStatus.CLOSED:
                 incident.closed_by = user_id
-                incident.closed_at = datetime.now(timezone.utc)
+                incident.closed_at = datetime.now(UTC)
 
         await db.flush()
         await db.refresh(incident)

@@ -1,14 +1,13 @@
 """Pharmacy service: drug management, inventory, dispensing."""
 
-from datetime import date, datetime, timedelta, timezone
-from typing import List, Optional
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.clinical import Prescription, PrescriptionItem, PrescriptionStatus
 from app.models.pharmacy import Dispensing, Drug, DrugInventory
-from app.models.clinical import PrescriptionItem, Prescription, PrescriptionStatus
 from app.schemas.pharmacy import DispensingCreate, DrugCreate, DrugInventoryCreate, DrugUpdate
 
 
@@ -27,13 +26,13 @@ class PharmacyService:
     async def search_drugs(
         self,
         db: AsyncSession,
-        name: Optional[str] = None,
-        generic_name: Optional[str] = None,
-        drug_type: Optional[str] = None,
+        name: str | None = None,
+        generic_name: str | None = None,
+        drug_type: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
-        query = select(Drug).where(Drug.is_deleted == False, Drug.is_active == True)  # noqa: E712
+        query = select(Drug).where(Drug.is_deleted == False, Drug.is_active == True)
         if name:
             query = query.where(Drug.name.ilike(f"%{name}%"))
         if generic_name:
@@ -75,7 +74,7 @@ class PharmacyService:
             .join(Drug, DrugInventory.drug_id == Drug.id)
             .where(
                 DrugInventory.quantity_in_stock <= DrugInventory.reorder_level,
-                DrugInventory.is_deleted == False,  # noqa: E712
+                DrugInventory.is_deleted == False,
             )
         )
         alerts = []
@@ -98,7 +97,7 @@ class PharmacyService:
             .where(
                 DrugInventory.expiry_date <= threshold,
                 DrugInventory.quantity_in_stock > 0,
-                DrugInventory.is_deleted == False,  # noqa: E712
+                DrugInventory.is_deleted == False,
             )
             .order_by(DrugInventory.expiry_date)
         )
@@ -145,7 +144,7 @@ class PharmacyService:
             patient_id=patient_id,
             dispensed_by=user_id,
             quantity_dispensed=data.quantity,
-            dispensed_at=datetime.now(timezone.utc),
+            dispensed_at=datetime.now(UTC),
             notes=data.notes,
         )
         db.add(dispensing)
@@ -174,7 +173,7 @@ class PharmacyService:
             select(Prescription)
             .where(
                 Prescription.status == PrescriptionStatus.SIGNED,
-                Prescription.is_deleted == False,  # noqa: E712
+                Prescription.is_deleted == False,
             )
             .order_by(Prescription.created_at.asc())
         )

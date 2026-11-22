@@ -1,10 +1,10 @@
 """Utility helper functions for IDs, numbers, formatting, and cryptography."""
 
-from datetime import date, datetime
-from decimal import Decimal
 import random
 import re
 import string
+from datetime import date, datetime
+from decimal import Decimal
 
 
 def generate_uhid() -> str:
@@ -62,7 +62,7 @@ def format_indian_currency(amount: Decimal) -> str:
         last_three = integer_part[-3:]
         remaining = integer_part[:-3]
         # Group remaining by 2 digits from right to left
-        grouped = []
+        grouped: list[str] = []
         while len(remaining) > 2:
             grouped.insert(0, remaining[-2:])
             remaining = remaining[:-2]

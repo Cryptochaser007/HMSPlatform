@@ -1,8 +1,8 @@
 """Quality & Accreditation (NABH) indicators and incident reporting endpoints."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
@@ -42,12 +42,12 @@ async def create_quality_indicator(
 
 @router.get(
     "/indicators",
-    response_model=List[QualityIndicatorResponse],
+    response_model=list[QualityIndicatorResponse],
     dependencies=[Depends(require_permissions(Permission.QUALITY_READ.value))],
 )
 async def list_quality_indicators(
     db: AsyncSession = Depends(get_db),
-) -> List[QualityIndicatorResponse]:
+) -> list[QualityIndicatorResponse]:
     """List configured hospital clinical quality & patient safety indicators."""
     indicators = await quality_service.list_indicators(db)
     return [QualityIndicatorResponse.model_validate(i) for i in indicators]
@@ -61,7 +61,7 @@ async def list_quality_indicators(
 )
 async def record_indicator_measurement(
     data: QualityMeasurementCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> QualityMeasurementResponse:
     """Log periodic numerator/denominator metrics for indicator calculation."""
@@ -92,7 +92,7 @@ async def get_nabh_compliance_dashboard(
 )
 async def report_incident(
     data: IncidentReportCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> IncidentReportResponse:
     """Report clinical incident, sentinel event, medication error, or near miss."""
@@ -117,10 +117,10 @@ async def report_incident(
     dependencies=[Depends(require_permissions(Permission.QUALITY_READ.value))],
 )
 async def list_incident_reports(
-    status_filter: Optional[str] = Query(None),
+    status_filter: str | None = Query(None),
     pagination: PaginationParams = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Review hospital incident register."""
     res = await quality_service.list_incidents(
         db, page=pagination.page, page_size=pagination.page_size, status_filter=status_filter
@@ -141,7 +141,7 @@ async def list_incident_reports(
 async def update_incident_investigation(
     incident_id: str,
     data: IncidentReportUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> IncidentReportResponse:
     """Document root cause analysis (RCA), corrective actions (CAPA), and closure."""

@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 from enum import Enum
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -165,11 +164,11 @@ class ABDMSettings(BaseSettings):
         default=ABDMMode.MOCK,
         description="ABDM execution mode: MOCK | SANDBOX | PRODUCTION",
     )
-    abdm_gateway_url: Optional[str] = Field(
+    abdm_gateway_url: str | None = Field(
         default=None,
         description="NHA Gateway base URL (e.g. https://dev.abdm.gov.in)",
     )
-    abdm_abha_url: Optional[str] = Field(
+    abdm_abha_url: str | None = Field(
         default=None,
         description="ABHA v3 API base URL (e.g. https://abhasbx.abdm.gov.in/abha/api/v3)",
     )
@@ -301,7 +300,7 @@ class ABDMSettings(BaseSettings):
         }
 
 
-@lru_cache()
+@lru_cache
 def get_abdm_settings() -> ABDMSettings:
     """Return cached ABDMSettings instance."""
     return ABDMSettings()

@@ -4,12 +4,9 @@ Optional cloud SDKs are imported only when their adapters are selected.
 """
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
 from urllib.parse import quote
 
 from app.core.config import get_settings
@@ -34,7 +31,7 @@ class KMSProvider(ABC):
 
 class EnvEnvelopeKMSAdapter(KMSProvider):
     """Free-tier envelope key derived from ENCRYPTION_MASTER_KEY."""
-    def __init__(self, master_key: Optional[str] = None) -> None:
+    def __init__(self, master_key: str | None = None) -> None:
         self.key_version = os.environ.get("ENCRYPTION_KEY_VERSION", "1")
         secret = master_key or os.environ.get(f"ENCRYPTION_MASTER_KEY_V{self.key_version}") or getattr(settings, "ENCRYPTION_MASTER_KEY", "")
         if not secret and settings.ENVIRONMENT.lower() != "production":
@@ -63,7 +60,7 @@ class EnvEnvelopeKMSAdapter(KMSProvider):
 
 
 class AWSKMSAdapter(KMSProvider):
-    def __init__(self, key_id: Optional[str] = None, region: str = "ap-south-1") -> None:
+    def __init__(self, key_id: str | None = None, region: str = "ap-south-1") -> None:
         try:
             import boto3
         except ImportError as exc:
@@ -98,7 +95,7 @@ class StorageProvider(ABC):
 
 
 class SupabaseStorageAdapter(StorageProvider):
-    def __init__(self, url: Optional[str] = None, key: Optional[str] = None, bucket: Optional[str] = None) -> None:
+    def __init__(self, url: str | None = None, key: str | None = None, bucket: str | None = None) -> None:
         self.url = (url or os.environ.get("SUPABASE_URL", "")).rstrip("/")
         self.key = key or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
         self.bucket = bucket or os.environ.get("SUPABASE_PRIVATE_BUCKET", "clinical-records")
@@ -132,7 +129,7 @@ class SupabaseStorageAdapter(StorageProvider):
 
 
 class S3StorageAdapter(StorageProvider):
-    def __init__(self, bucket: Optional[str] = None, region: str = "ap-south-1", kms_key_id: Optional[str] = None) -> None:
+    def __init__(self, bucket: str | None = None, region: str = "ap-south-1", kms_key_id: str | None = None) -> None:
         try:
             import boto3
         except ImportError as exc:

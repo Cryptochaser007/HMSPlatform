@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { authApi } from '../services/api';
-import { UserRole } from '../types';
 import {
   Lock,
   Mail,
@@ -11,10 +10,6 @@ import {
   Stethoscope,
   ShieldCheck,
   UserPlus,
-  UserCheck,
-  Building2,
-  FileBadge,
-  Phone,
   CheckCircle2,
 } from 'lucide-react';
 
@@ -28,12 +23,10 @@ export const Login: React.FC = () => {
 
   // Signup fields
   const [fullName, setFullName] = useState('');
+  const [hospitalName, setHospitalName] = useState('');
+  const [hospitalSlug, setHospitalSlug] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('DOCTOR');
-  const [department, setDepartment] = useState('General Medicine');
-  const [regNumber, setRegNumber] = useState('');
-  const [phone, setPhone] = useState('');
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -48,7 +41,6 @@ export const Login: React.FC = () => {
       await login(email, password);
       navigate('/');
     } catch (err: any) {
-      console.error('Login error details:', err);
       const serverDetail = err.response?.data?.detail;
       if (serverDetail) {
         setError(serverDetail);
@@ -71,17 +63,15 @@ export const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      await authApi.signup({
-        email: signupEmail,
-        password: signupPassword,
-        full_name: fullName,
-        role: role,
-        department: department || undefined,
-        registration_number: regNumber || undefined,
-        phone: phone || undefined,
+      await authApi.registerHospital({
+        hospital_name: hospitalName,
+        slug: hospitalSlug,
+        admin_email: signupEmail,
+        admin_password: signupPassword,
+        admin_name: fullName,
       });
 
-      setSuccessMsg(`Account created successfully for ${fullName} (${role})! Signing you in...`);
+      setSuccessMsg(`Hospital registered for ${fullName}. Signing you in…`);
       // Auto login with new credentials
       try {
         await login(signupEmail, signupPassword);
@@ -93,7 +83,6 @@ export const Login: React.FC = () => {
         setSuccessMsg('Account registered! Please sign in with your credentials.');
       }
     } catch (err: any) {
-      console.error('Signup error:', err);
       const detail = err.response?.data?.detail;
       if (typeof detail === 'string') {
         setError(detail);
@@ -159,7 +148,7 @@ export const Login: React.FC = () => {
             }`}
           >
             <UserPlus className="w-4 h-4" />
-            Register New Staff
+            Register Hospital
           </button>
         </div>
 
@@ -233,146 +222,43 @@ export const Login: React.FC = () => {
           </form>
         )}
 
-        {/* Register Staff Form */}
         {mode === 'signup' && (
-          <form onSubmit={handleSignupSubmit} className="p-6 pt-2 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Full Name
-                </label>
-                <div className="relative">
-                  <UserCheck className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Dr. Ananya Roy"
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Staff Role (RBAC)
-                </label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as UserRole)}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent bg-white font-medium"
-                >
-                  <option value="DOCTOR">Doctor / Physician</option>
-                  <option value="NURSE">Nurse / Clinical Care</option>
-                  <option value="FRONT_DESK">Front Desk / Reception</option>
-                  <option value="PHARMACIST">Pharmacist</option>
-                  <option value="LAB_TECHNICIAN">Laboratory Technician</option>
-                  <option value="RADIOLOGIST">Radiologist</option>
-                  <option value="BILLING_CLERK">Billing & Claims Clerk</option>
-                  <option value="HOSPITAL_ADMIN">Hospital Administrator</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Official Staff Email
-              </label>
-              <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="email"
-                  required
-                  value={signupEmail}
-                  onChange={(e) => setSignupEmail(e.target.value)}
-                  placeholder="ananya.roy@hms.local"
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Password (min 8 characters)
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={signupPassword}
-                  onChange={(e) => setSignupPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Department
-                </label>
-                <div className="relative">
-                  <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    placeholder="Pediatrics / OPD"
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Reg / License #
-                </label>
-                <div className="relative">
-                  <FileBadge className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    value={regNumber}
-                    onChange={(e) => setRegNumber(e.target.value)}
-                    placeholder="NMC-2024-XXXX"
-                    className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                Phone Number
-              </label>
-              <div className="relative">
-                <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="9876543210"
-                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-            >
-              {loading ? (
-                <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-              ) : (
-                <>
-                  <UserPlus className="w-4 h-4" />
-                  Complete Registration & Sign In
-                </>
-              )}
+          <form onSubmit={handleSignupSubmit} className="p-6 pt-2 space-y-4">
+            <label className="block text-sm font-medium">
+              Hospital name
+              <input required minLength={2} maxLength={255} value={hospitalName}
+                onChange={(e) => setHospitalName(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 p-2" />
+            </label>
+            <label className="block text-sm font-medium">
+              Hospital slug
+              <input required minLength={2} maxLength={80} pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                placeholder="city-general-hospital" value={hospitalSlug}
+                onChange={(e) => setHospitalSlug(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 p-2" />
+            </label>
+            <label className="block text-sm font-medium">
+              Administrator name
+              <input required minLength={2} maxLength={255} value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 p-2" />
+            </label>
+            <label className="block text-sm font-medium">
+              Administrator email
+              <input required type="email" autoComplete="email" value={signupEmail}
+                onChange={(e) => setSignupEmail(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 p-2" />
+            </label>
+            <label className="block text-sm font-medium">
+              Password
+              <input required type="password" autoComplete="new-password" minLength={8} maxLength={72}
+                value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)}
+                className="mt-1 w-full rounded border border-slate-300 p-2" />
+            </label>
+            <p className="text-xs text-slate-600">Your trial includes an OPD department and simulated ABHA workflows.</p>
+            <button type="submit" disabled={loading}
+              className="w-full rounded bg-brand-600 p-3 font-semibold text-white disabled:opacity-50">
+              {loading ? 'Registering hospital…' : 'Register Hospital'}
             </button>
           </form>
         )}

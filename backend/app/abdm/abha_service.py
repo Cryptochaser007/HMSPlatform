@@ -11,12 +11,12 @@ Supports:
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.abdm.client import ABDMClient, ABDMError, utc_timestamp_iso
 from app.abdm.config import ABDM_ENDPOINTS, ABDMMode
+from app.core.tenant_context import tenant_cache_key
 from app.core.wasa_security import mask_identifier
 
 logger = logging.getLogger("abdm.abha")
@@ -43,26 +44,26 @@ class ABHAProfile(BaseModel):
         ..., description="14-digit ABHA number (XX-XXXX-XXXX-XXXX)"
     )
     name: str = Field(..., description="Full name as on e-KYC")
-    first_name: Optional[str] = Field(default=None)
-    middle_name: Optional[str] = Field(default=None)
-    last_name: Optional[str] = Field(default=None)
+    first_name: str | None = Field(default=None)
+    middle_name: str | None = Field(default=None)
+    last_name: str | None = Field(default=None)
     gender: str = Field(..., description="M / F / O")
     year_of_birth: int = Field(..., ge=1900)
-    month_of_birth: Optional[int] = Field(default=None, ge=1, le=12)
-    day_of_birth: Optional[int] = Field(default=None, ge=1, le=31)
-    address: Optional[str] = Field(default=None)
-    district: Optional[str] = Field(default=None)
-    state: Optional[str] = Field(default=None)
-    pincode: Optional[str] = Field(default=None)
-    mobile: Optional[str] = Field(default=None)
-    email: Optional[str] = Field(default=None)
-    profile_photo: Optional[str] = Field(default=None)
+    month_of_birth: int | None = Field(default=None, ge=1, le=12)
+    day_of_birth: int | None = Field(default=None, ge=1, le=31)
+    address: str | None = Field(default=None)
+    district: str | None = Field(default=None)
+    state: str | None = Field(default=None)
+    pincode: str | None = Field(default=None)
+    mobile: str | None = Field(default=None)
+    email: str | None = Field(default=None)
+    profile_photo: str | None = Field(default=None)
     kycVerified: bool = Field(default=False)
     kyc_status: str = Field(default="VERIFIED")
     abdm_mode: str = Field(default="MOCK")
 
     @property
-    def date_of_birth(self) -> Optional[date]:
+    def date_of_birth(self) -> date | None:
         if self.month_of_birth and self.day_of_birth:
             return date(self.year_of_birth, self.month_of_birth, self.day_of_birth)
         return None
@@ -71,7 +72,7 @@ class ABHAProfile(BaseModel):
 class ABHAService:
     """Service layer for ABDM v3 M1 ABHA lifecycle and Scan & Share workflows."""
 
-    def __init__(self, client: Optional[ABDMClient] = None) -> None:
+    def __init__(self, client: ABDMClient | None = None) -> None:
         self._client = client or ABDMClient()
 
     # ------------------------------------------------------------------
@@ -79,7 +80,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def generate_aadhaar_otp(
-        self, aadhaar_number: str, user_id: Optional[str] = None
+        self, aadhaar_number: str, user_id: str | None = None
     ) -> dict:
         aadhaar_clean = aadhaar_number.replace(" ", "").replace("-", "")
         if len(aadhaar_clean) != 12 or not aadhaar_clean.isdigit():
@@ -113,7 +114,7 @@ class ABHAService:
         )
 
     async def verify_aadhaar_otp(
-        self, txn_id: str, otp: str, mobile: Optional[str] = None, user_id: Optional[str] = None
+        self, txn_id: str, otp: str, mobile: str | None = None, user_id: str | None = None
     ) -> dict:
         otp_clean = otp.strip()
         if len(otp_clean) != 6 or not otp_clean.isdigit():
@@ -152,7 +153,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def generate_mobile_otp(
-        self, mobile: str, user_id: Optional[str] = None
+        self, mobile: str, user_id: str | None = None
     ) -> dict:
         mobile_clean = mobile.replace(" ", "").replace("-", "").replace("+91", "")
         if len(mobile_clean) != 10 or not mobile_clean.isdigit():
@@ -182,7 +183,7 @@ class ABHAService:
         )
 
     async def verify_mobile_otp(
-        self, txn_id: str, otp: str, user_id: Optional[str] = None
+        self, txn_id: str, otp: str, user_id: str | None = None
     ) -> dict:
         otp_clean = otp.strip()
         if len(otp_clean) != 6 or not otp_clean.isdigit():
@@ -213,7 +214,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def search_by_health_id(
-        self, health_id: str, user_id: Optional[str] = None
+        self, health_id: str, user_id: str | None = None
     ) -> dict:
         cleaned = health_id.strip()
         if not (_RE_ABHA_NUM.match(cleaned) or _RE_ABHA_ADDR.match(cleaned)):
@@ -234,7 +235,7 @@ class ABHAService:
         )
 
     async def get_abha_profile(
-        self, abha_id: str, user_id: Optional[str] = None
+        self, abha_id: str, user_id: str | None = None
     ) -> ABHAProfile:
         cleaned = abha_id.strip()
         result = await self._client._make_request(
@@ -258,12 +259,12 @@ class ABHAService:
         abha_number: str,
         abha_address: str,
         kyc_status: str = "VERIFIED",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Store verified 14-digit ABHA number, ABHA address, KYC status & timestamp on Patient."""
         from app.models.patient import Patient
 
         res = await db.execute(
-            select(Patient).where(Patient.id == patient_id, Patient.is_deleted == False)  # noqa: E712
+            select(Patient).where(Patient.id == patient_id, Patient.is_deleted == False)
         )
         patient = res.scalar_one_or_none()
         if not patient:
@@ -273,7 +274,7 @@ class ABHAService:
                 http_status=404,
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         patient.abha_id = abha_number.strip()
         patient.abha_address = abha_address.strip().lower()
         patient.abha_kyc_status = kyc_status.upper()
@@ -295,8 +296,8 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def handle_patient_share(
-        self, db: AsyncSession, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, db: AsyncSession, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """Process incoming NHA ABHA QR Scan & Share webhook and issue instant OPD token."""
         req_id = payload.get("requestId") or str(uuid.uuid4())
         intent = payload.get("intent", {})
@@ -328,9 +329,9 @@ class ABHAService:
         hip_id = meta_data.get("hipId") or self._client.settings.hip_id
         counter_id = meta_data.get("context") or intent.get("type") or "OPD-COUNTER-01"
         from app.core.redis_state import get_redis
-        day_key = datetime.now(timezone.utc).strftime("%Y%m%d")
+        day_key = datetime.now(UTC).strftime("%Y%m%d")
         token_number = f"TKN-{await (await get_redis()).incr(f'abdm:share:token:{day_key}') }"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires_at = now + timedelta(minutes=30)
 
         # Record inbound webhook in WASA transaction log
@@ -344,7 +345,7 @@ class ABHAService:
         )
 
         # Match existing patient if already registered
-        matched_patient_id: Optional[str] = None
+        matched_patient_id: str | None = None
         try:
             from app.models.patient import Patient
 
@@ -356,10 +357,11 @@ class ABHAService:
                 if found:
                     matched_patient_id = str(found.id)
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             try:
                 await db.rollback()
             except Exception:
-                pass
+                logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
 
         record_dict = {
             "id": str(uuid.uuid4()),
@@ -401,16 +403,17 @@ class ABHAService:
             await db.flush()
             record_dict["id"] = str(share_row.id)
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("Using in-memory Scan & Share queue fallback: %s", exc)
             try:
                 await db.rollback()
             except Exception:
-                pass
+                logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             # Redis fallback is shared across workers; protect the patient profile at rest.
             from app.core.encryption import encrypt_field
             queue = await get_redis()
-            await queue.lpush(_SHARE_QUEUE_KEY, encrypt_field(json.dumps(record_dict, separators=(",", ":"))))
-            await queue.ltrim(_SHARE_QUEUE_KEY, 0, 499)
+            await queue.lpush(tenant_cache_key(_SHARE_QUEUE_KEY), encrypt_field(json.dumps(record_dict, separators=(",", ":"))))
+            await queue.ltrim(tenant_cache_key(_SHARE_QUEUE_KEY), 0, 499)
 
         # Send async on-share acknowledgement back to NHA Gateway
         on_share_payload = {
@@ -435,6 +438,7 @@ class ABHAService:
                 correlation_id=req_id,
             )
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.warning("on-share callback dispatch warning: %s", exc)
 
         return {
@@ -444,14 +448,14 @@ class ABHAService:
             "share_profile": record_dict,
         }
 
-    async def list_share_queue(self, db: AsyncSession) -> List[Dict[str, Any]]:
+    async def list_share_queue(self, db: AsyncSession) -> list[dict[str, Any]]:
         """List recent ABHA QR Scan & Share counter check-in profiles."""
         try:
             from app.models.abdm import ABDMShareProfile
 
             res = await db.execute(
                 select(ABDMShareProfile)
-                .where(ABDMShareProfile.is_deleted == False)  # noqa: E712
+                .where(ABDMShareProfile.is_deleted == False)
                 .order_by(desc(ABDMShareProfile.created_at))
                 .limit(25)
             )
@@ -478,11 +482,11 @@ class ABHAService:
                     for r in rows
                 ]
         except Exception:
-            pass
-        from app.core.redis_state import get_redis
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         from app.core.encryption import decrypt_field
+        from app.core.redis_state import get_redis
         queue = await get_redis()
-        values = await queue.lrange(_SHARE_QUEUE_KEY, 0, 24)
+        values = await queue.lrange(tenant_cache_key(_SHARE_QUEUE_KEY), 0, 24)
         return [json.loads(decrypt_field(value)) for value in values]
 
     # ------------------------------------------------------------------
@@ -531,15 +535,19 @@ class ABHAService:
         """
         try:
             import base64
+
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 
             public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+            if not isinstance(public_key, RSAPublicKey):
+                raise TypeError("NHA certificate must contain an RSA public key")
             ciphertext = public_key.encrypt(
                 plaintext.encode("utf-8"),
                 asym_padding.OAEP(
-                    mgf=asym_padding.MGF1(algorithm=hashes.SHA1()),  # noqa: S303
-                    algorithm=hashes.SHA1(),  # noqa: S303
+                    mgf=asym_padding.MGF1(algorithm=hashes.SHA1()),
+                    algorithm=hashes.SHA1(),
                     label=None,
                 ),
             )
@@ -562,7 +570,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def resend_otp(
-        self, txn_id: str, otp_system: str = "aadhaar", user_id: Optional[str] = None
+        self, txn_id: str, otp_system: str = "aadhaar", user_id: str | None = None
     ) -> dict:
         """Resend OTP for existing transaction (max 2 times per NHA spec).
 
@@ -609,11 +617,11 @@ class ABHAService:
         date_of_birth: str,
         gender: str,
         mobile: str,
-        state_code: Optional[str] = None,
-        district_code: Optional[str] = None,
-        address: Optional[str] = None,
-        pincode: Optional[str] = None,
-        user_id: Optional[str] = None,
+        state_code: str | None = None,
+        district_code: str | None = None,
+        address: str | None = None,
+        pincode: str | None = None,
+        user_id: str | None = None,
     ) -> dict:
         """Create ABHA via Aadhaar demographic authentication (no OTP)."""
         aadhaar_clean = aadhaar_number.replace(" ", "").replace("-", "")
@@ -685,7 +693,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def login_by_communication_mobile(
-        self, mobile: str, user_id: Optional[str] = None
+        self, mobile: str, user_id: str | None = None
     ) -> dict:
         """Initiate ABHA retrieval/login using communication mobile number."""
         mobile_clean = mobile.replace(" ", "").replace("-", "").replace("+91", "")
@@ -717,7 +725,7 @@ class ABHAService:
         )
 
     async def verify_communication_mobile_otp(
-        self, txn_id: str, otp: str, user_id: Optional[str] = None
+        self, txn_id: str, otp: str, user_id: str | None = None
     ) -> dict:
         """Verify OTP for communication mobile login and return matching ABHA list."""
         otp_clean = otp.strip()
@@ -749,7 +757,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def login_by_aadhaar_otp(
-        self, aadhaar_number: str, user_id: Optional[str] = None
+        self, aadhaar_number: str, user_id: str | None = None
     ) -> dict:
         """Initiate ABHA verification/login using Aadhaar OTP."""
         aadhaar_clean = aadhaar_number.replace(" ", "").replace("-", "")
@@ -780,7 +788,7 @@ class ABHAService:
         )
 
     async def verify_aadhaar_login_otp(
-        self, txn_id: str, otp: str, user_id: Optional[str] = None
+        self, txn_id: str, otp: str, user_id: str | None = None
     ) -> dict:
         """Verify Aadhaar OTP for ABHA login and return ABHA profile."""
         otp_clean = otp.strip()
@@ -812,7 +820,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def get_abha_card(
-        self, abha_token: str, user_id: Optional[str] = None
+        self, abha_token: str, user_id: str | None = None
     ) -> dict:
         """Fetch ABHA card data including QR code and demographics."""
         return await self._client._make_request(
@@ -824,7 +832,7 @@ class ABHAService:
         )
 
     async def get_abha_qr(
-        self, abha_token: str, user_id: Optional[str] = None
+        self, abha_token: str, user_id: str | None = None
     ) -> dict:
         """Fetch ABHA QR code for display on registration counter."""
         return await self._client._make_request(
@@ -840,7 +848,7 @@ class ABHAService:
     # ------------------------------------------------------------------
 
     async def get_abha_address_suggestions(
-        self, txn_id: str, user_id: Optional[str] = None
+        self, txn_id: str, user_id: str | None = None
     ) -> dict:
         """Get at least 3 ABHA address suggestions after OTP verification."""
         return await self._client._make_request(
@@ -851,7 +859,7 @@ class ABHAService:
             user_id=user_id,
         )
 
-    async def enrol_abha_address(self, txn_id: str, abha_address: str, user_id: Optional[str] = None) -> dict:
+    async def enrol_abha_address(self, txn_id: str, abha_address: str, user_id: str | None = None) -> dict:
         """Finalize selection of an ABHA address returned by the suggestion flow."""
         if not _RE_ABHA_ADDR.fullmatch(abha_address):
             raise ABDMError("Invalid ABHA address", "VALIDATION", 422)

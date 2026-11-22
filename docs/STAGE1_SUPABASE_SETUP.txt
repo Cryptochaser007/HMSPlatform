@@ -1,0 +1,167 @@
+Stage 1 production setup: existing Supabase database and Vercel application
+
+1. Preserve the recovery material before making hosted changes
+Save a database backup/export through your existing backup procedure. Record row
+counts for users, patients, hospitals (if present), and audit_logs as the database
+owner. Save existing deployment secret values in your private password manager:
+ENCRYPTION_KEY, ENCRYPTION_MASTER_KEY (if configured), every historical/versioned
+encryption key and key-version setting, and SECRET_KEY. Preserve their exact bytes.
+Do not generate replacements, copy example keys, or add a new master key to an
+existing installation as part of this deployment. Never put these secrets in Git
+or frontend VITE_* variables. The new runtime database password is a separate secret.
+
+Pushing main can automatically deploy Vercel. Complete steps 2-5 before treating
+that deployment as ready for sign-in. Use a quiet maintenance window for the SQL;
+schema changes lock tables. A successful build alone does not validate database setup.
+
+2. Apply only the new migration
+In the correct Supabase project, open SQL Editor as the database/migration owner.
+Open backend/migrations/003_stage1_multitenancy_and_rls.sql from this commit, paste
+the ENTIRE file, and run it once. Do not run individual fragments out of order.
+It includes BEGIN/COMMIT and is designed to be idempotent. It supports databases
+that already ran the older two 003 scripts; do not rerun those scripts afterward.
+Do not rerun the original schema or seed on your existing populated database.
+
+The migration preserves existing hospital IDs and ciphertext. Rows missing tenant
+ownership are assigned to Demo General Hospital. It temporarily disables enabled
+user triggers during the tenant metadata backfill, then restores them in the same
+transaction; audit immutability is installed at the end. The published demo
+SUPER_ADMIN account becomes HOSPITAL_ADMIN within its own hospital.
+
+If the script errors, retain the full error and stop before configuring runtime.
+An aborted transaction must be rolled back (ROLLBACK;) if your SQL session remains
+open. Fix the reported cause and rerun the whole migration. Do not drop tables,
+disable RLS, or remove append-only triggers manually to make an error disappear.
+
+3. Create the restricted application database role
+Run the following in SQL Editor as the owner AFTER step 2. Replace the password
+placeholder with a NEW long random password for this database role only. Keep it
+private. The block skips role creation if the name already exists; it does not
+silently reset an existing password. If the role exists, inspect its membership
+and ownership before reusing it. Never grant postgres or hms_system to this login.
+
+BEGIN;
+DO $$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hms_runtime') THEN
+  CREATE ROLE hms_runtime LOGIN PASSWORD 'REPLACE_WITH_NEW_RANDOM_DATABASE_PASSWORD'
+   NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ END IF;
+END $$;
+GRANT CONNECT ON DATABASE postgres TO hms_runtime;
+GRANT USAGE ON SCHEMA public TO hms_runtime;
+DO $$ DECLARE t text; BEGIN
+ FOREACH t IN ARRAY ARRAY['hospitals','departments','users','patients','encounters',
+ 'clinical_notes','admissions','prescriptions','prescription_items','lab_tests',
+ 'lab_orders','lab_results','radiology_orders','radiology_reports','bills',
+ 'bill_items','payments','wards','beds','drugs','drug_inventory','dispensings',
+ 'quality_indicators','quality_measurements','incident_reports','consents',
+ 'abdm_share_profiles','abdm_care_context_links','abdm_consent_artefacts',
+ 'hfr_facilities','hpr_practitioners','referrals','insurance_policies','insurance_claims']
+ LOOP
+  IF to_regclass('public.'||t) IS NOT NULL THEN
+   EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO hms_runtime',t);
+  END IF;
+ END LOOP;
+END $$;
+GRANT SELECT, INSERT ON public.audit_logs, public.abdm_transaction_logs TO hms_runtime;
+GRANT EXECUTE ON FUNCTION public.hms_current_hospital_id() TO hms_runtime;
+COMMIT;
+
+The application tables use UUID IDs, so this schema needs no sequence grants.
+Future identity/serial columns need grants for their specific sequences. Future
+migrations should grant their new application tables explicitly. Do not grant
+schema CREATE, table ownership, or blanket grants across Supabase-managed schemas.
+
+Verify as owner:
+SELECT rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
+FROM pg_roles WHERE rolname='hms_runtime';
+-- Expected: login true; all four privileged flags false.
+SELECT pg_has_role('hms_runtime','hms_system','MEMBER') AS maintenance_membership;
+-- Expected false. Also inspect ALL inherited memberships; do not use a login
+-- inheriting another role with unrestricted application policies.
+SELECT r.rolname FROM pg_roles r
+WHERE r.rolname <> 'hms_runtime' AND pg_has_role('hms_runtime',r.oid,'MEMBER');
+-- A newly created role should return no rows.
+SELECT tablename FROM pg_tables WHERE schemaname='public' AND tableowner='hms_runtime';
+-- Expected no rows.
+SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+WHERE n.nspname='public' AND c.relname IN ('hospitals','users','patients','audit_logs');
+-- Expected true/true for each table.
+
+Optional owner-session RLS probe (no data changes):
+BEGIN;
+SET LOCAL ROLE hms_runtime;
+SELECT set_config('app.current_hospital_id','',true),
+       set_config('app.is_superadmin','false',true),
+       set_config('app.login_email','',true);
+SELECT count(*) FROM public.patients;
+-- Expected zero without tenant context, even if the owner sees patients.
+ROLLBACK;
+-- If SET ROLE is denied, perform the probe through a separate hms_runtime
+-- connection. Do not grant the runtime role extra privileges to run this probe.
+
+4. Configure shared Redis
+In Upstash Console create/select your Redis database. Open Connect -> TCP and
+copy the full READ/WRITE TLS URL with the default username (not default_ro):
+rediss://default:<URL_ENCODED_PASSWORD>@<HOST>:<PORT>/0
+Use the actual host/port shown by Upstash. This application uses redis-py over
+TCP, so UPSTASH_REDIS_REST_URL and REST tokens do not replace REDIS_URL.
+Use the console CLI to run PING and confirm PONG. Do not flush an existing Redis
+database. Authentication requires shared Redis for lockout, revocation, and idle
+session state; an unavailable service intentionally rejects authentication.
+
+5. Configure the Vercel backend environment, then redeploy
+Project -> Settings -> Environment Variables. Set these for Production (and only
+set Preview if it uses the intended isolated database and matching key set):
+
+DATABASE_URL=postgresql+asyncpg://hms_runtime.<PROJECT_REF>:<URL_ENCODED_ROLE_PASSWORD>@<SHARED_POOLER_HOST>:6543/postgres?ssl=require
+REDIS_URL=rediss://default:<URL_ENCODED_PASSWORD>@<UPSTASH_HOST>:<PORT>/0
+ENVIRONMENT=production
+DEBUG=false
+ABDM_ENV=MOCK
+CORS_ORIGINS=["https://hmsplatform-rho.vercel.app"]
+
+Use your actual production domain in CORS_ORIGINS. Copy the shared pooler host
+from Supabase's Connect dialog, transaction mode. Do not guess its region/index.
+The pooler username is hms_runtime.PROJECT_REF; the password is the NEW runtime
+role password, not the postgres owner password or Supabase API/service-role key.
+URL-encode password special characters. Use ssl=require for this asyncpg URL,
+not sslmode=require or Prisma-specific query parameters. Vercel supplies VERCEL=1;
+the code retains NullPool and statement_cache_size=0 for transaction pooling.
+
+Keep the existing SECRET_KEY and ALL encryption settings unchanged. Keep unrelated
+ABDM/application settings. Do not replace existing configuration with .env.example.
+Do not configure this login as an owner or bypass role to work around an error.
+Redeploy the current main commit after saving the environment variables; existing
+deployments do not automatically pick up environment edits. Keep API requests on
+the same HTTPS application origin so authentication cookies and CSRF work.
+
+6. Verify the hosted installation
+Open https://hmsplatform-rho.vercel.app/health and inspect database status. This
+endpoint does not probe Redis; use PING and the sign-in flow to verify Redis.
+Health connectivity alone does not prove runtime RLS or successful sign-in.
+Sign out/clear this application's old cookies and sign in with an existing user.
+Existing tokens lack the new hospital claim and must be replaced by fresh login.
+Confirm an existing encrypted patient field displays correctly. Compare owner
+row counts with the saved counts; preserve the backup until verification is done.
+
+Use Register Hospital with two synthetic hospitals A and B and distinct admin
+emails. Each successful POST /api/v1/tenants/register should return HTTP 201 and
+create MOCK/TRIAL settings, an administrator, an OPD department, and starter NABH
+indicators. In separate browser profiles, create a synthetic patient in A, then
+confirm B cannot list or open it using its UUID. Never use actual patient data
+for a signup smoke test. Verify logout and the 15-minute idle expiry. Five failed
+login attempts intentionally block further attempts for 15 minutes.
+
+If sign-in fails, capture the request_id, HTTP status, and sanitized backend log
+entry from the current deployment. Never share connection URLs, passwords, tokens,
+or decrypted patient data. A runtime-role 503 means the deployed DATABASE_URL is
+still privileged; Redis 503 means REDIS_URL/credentials/connectivity need fixing;
+missing relation/column or permission errors mean migration/grants need checking.
+Do not remove these security checks to restore access.
+
+Sources checked 22 November 2026:
+https://supabase.com/docs/guides/database/connecting-to-postgres
+https://upstash.com/docs/redis/quickstarts/render
+https://upstash.com/docs/redis/features/security

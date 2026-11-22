@@ -1,16 +1,18 @@
 """FastAPI application entrypoint for ABDM-Enabled NABH HMS Platform."""
 
 import traceback
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Dict
+from typing import Any
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.abdm.callbacks import router as abdm_v3_callbacks_router
+from app.abdm.callbacks import verify_gateway_callback_request
 from app.api.v1.router import api_router
-from app.abdm.callbacks import router as abdm_v3_callbacks_router, verify_gateway_callback_request
 from app.core.config import get_settings
 from app.core.database import check_db_health
 from app.core.dependencies import RequestIDMiddleware
@@ -35,6 +37,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         print("✅ Database connection established successfully.")
     yield
     # Shutdown
+    from app.core import dependencies, redis_state, security
+    from app.core.database import engine
+    for module, attribute in ((dependencies, "_redis_pool"),
+                              (redis_state, "_client"), (security, "_redis_pool")):
+        client = getattr(module, attribute)
+        if client is not None:
+            await client.aclose()
+            setattr(module, attribute, None)
+    await engine.dispose()
     print("🛑 Shutting down HMS Platform API server.")
 
 
@@ -112,7 +123,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     request_id = getattr(request.state, "request_id", "unknown")
     masked_trace = mask_pii_text(traceback.format_exc())
     print(f"[Unhandled Server Error] Request ID: {request_id}\n{masked_trace}")
-    content: Dict[str, Any] = {
+    content: dict[str, Any] = {
         "detail": "An internal server error occurred. Please reference the request_id with support.",
         "request_id": request_id,
     }
@@ -129,7 +140,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 
 @app.get("/health", tags=["System Diagnostics"])
-async def health_check() -> Dict[str, Any]:
+async def health_check() -> dict[str, Any]:
     """Perform health checks on database and ABDM adapter readiness (WASA-safe)."""
     from app.abdm.config import get_abdm_settings
 
@@ -149,7 +160,7 @@ async def health_check() -> Dict[str, Any]:
 
 
 @app.get("/", tags=["System Diagnostics"])
-async def root() -> Dict[str, str]:
+async def root() -> dict[str, str]:
     """Root info endpoint."""
     payload = {
         "app": settings.APP_NAME,

@@ -3,21 +3,20 @@ Security utilities: password hashing, JWT creation / verification,
 token blacklisting (Redis), and FastAPI auth dependencies.
 """
 
+import hmac
 import logging
 import os
-import bcrypt
-import hmac
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Set
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
+import bcrypt
+import redis.asyncio as aioredis
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import redis.asyncio as aioredis
 
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -40,6 +39,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         hash_bytes = hashed_password.encode("utf-8")
         return bcrypt.checkpw(pwd_bytes, hash_bytes)
     except Exception:
+        logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         return False
 
 
@@ -48,12 +48,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(
     subject: str,
     role: str,
-    permissions: List[str],
-    extra_claims: Optional[Dict[str, Any]] = None,
+    permissions: list[str],
+    extra_claims: dict[str, Any] | None = None,
 ) -> str:
     """Create a short-lived access JWT."""
-    now = datetime.now(timezone.utc)
-    claims: Dict[str, Any] = {
+    now = datetime.now(UTC)
+    claims: dict[str, Any] = {
         "sub": subject,
         "role": role,
         "permissions": permissions,
@@ -69,11 +69,11 @@ def create_access_token(
 
 def create_refresh_token(
     subject: str,
-    extra_claims: Optional[Dict[str, Any]] = None,
+    extra_claims: dict[str, Any] | None = None,
 ) -> str:
     """Create a long-lived refresh JWT."""
-    now = datetime.now(timezone.utc)
-    claims: Dict[str, Any] = {
+    now = datetime.now(UTC)
+    claims: dict[str, Any] = {
         "sub": subject,
         "exp": now + timedelta(minutes=settings.REFRESH_TOKEN_EXPIRE_MINUTES),
         "iat": now,
@@ -85,7 +85,7 @@ def create_refresh_token(
     return jwt.encode(claims, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def decode_token(token: str) -> Dict[str, Any]:
+def decode_token(token: str) -> dict[str, Any]:
     """Decode and validate a JWT, returning its claims dict.
 
     Raises ``JWTError`` on any validation failure.
@@ -97,17 +97,18 @@ logger = logging.getLogger(__name__)
 
 # ── Token blacklist (Redis + in-memory fallback) ─────────────────────────
 
-_redis_pool: Optional[aioredis.Redis] = None
-_memory_blacklist: Set[str] = set()
+_redis_pool: aioredis.Redis | None = None
+_memory_blacklist: set[str] = set()
 
 
-async def _get_redis() -> Optional[aioredis.Redis]:
+async def _get_redis() -> aioredis.Redis | None:
     global _redis_pool
     if _redis_pool is not None:
         try:
             await _redis_pool.ping()
             return _redis_pool
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             _redis_pool = None
 
     redis_url = getattr(settings, "REDIS_URL", "")
@@ -125,31 +126,55 @@ async def _get_redis() -> Optional[aioredis.Redis]:
         _redis_pool = client
         return _redis_pool
     except Exception:
+        logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         return None
 
 
+async def security_redis():
+    """Shared authentication state must remain available across workers."""
+    r = await _get_redis()
+    if r is None:
+        raise HTTPException(status_code=503, detail="Authentication state service unavailable")
+    return r
+
+
 async def blacklist_token(jti: str, expires_in: int = 3600) -> None:
-    """Add a JTI to the shared Redis blacklist until its natural expiry."""
-    _memory_blacklist.add(jti)
     try:
-        r = await _get_redis()
-        if r is not None:
-            await r.setex(f"bl:{jti}", max(expires_in, 60), "1")
+        await (await security_redis()).setex(f"bl:{jti}", max(expires_in, 1), "1")
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.debug("Failed to set blacklist token in Redis: %s", exc)
+        raise HTTPException(status_code=503, detail="Authentication state service unavailable") from exc
 
 
 async def is_token_blacklisted(jti: str) -> bool:
-    """Return True if the JTI has been blacklisted."""
-    if jti in _memory_blacklist:
-        return True
     try:
-        r = await _get_redis()
-        if r is not None:
-            return bool(await r.exists(f"bl:{jti}"))
+        return bool(await (await security_redis()).exists(f"bl:{jti}"))
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.debug("Redis token blacklist check skipped: %s", exc)
-    return False
+        raise HTTPException(status_code=503, detail="Authentication state service unavailable") from exc
+
+
+async def validate_session(payload: dict, touch: bool = True) -> None:
+    if not payload.get("sid") or not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Session expired")
+    try:
+        r = await security_redis()
+        # Compare and touch atomically so an old session cannot extend a replacement.
+        script = """
+        if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+        if ARGV[2] == '1' then redis.call('EXPIRE', KEYS[1], 900) end
+        return 1
+        """
+        valid = await r.eval(script, 1, f"auth:session:{payload['sub']}",
+                             str(payload["sid"]), "1" if touch else "0")
+        if not valid:
+            raise HTTPException(status_code=401, detail="Session expired or replaced")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Authentication state service unavailable") from exc
 
 
 # ── FastAPI dependencies ────────────────────────────────────────────────
@@ -159,9 +184,9 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Extract and validate the JWT from the Authorization header.
 
     Returns a dict with the decoded claims plus a ``db_user`` key
@@ -186,7 +211,7 @@ async def get_current_user(
     except JWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Could not validate credentials: {str(exc)}",
+            detail=f"Could not validate credentials: {exc!s}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -198,22 +223,16 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check blacklist (safe against Redis connection issues)
+    # A revocation-store failure must stop authenticated requests.
     jti = payload.get("jti")
-    if jti:
-        try:
-            if await is_token_blacklisted(jti):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token has been revoked/logged out",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.debug("Blacklist check skipped due to Redis error: %s", exc)
+    if jti and await is_token_blacklisted(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked/logged out",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    user_id: Optional[str] = payload.get("sub")
+    user_id: str | None = payload.get("sub")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -239,35 +258,24 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Single active session per account with a 15-minute sliding idle TTL.
-    # Session state is shared in Redis (with in-memory fallback for serverless deployments).
-    session_id = payload.get("sid")
-    if session_id:
-        from app.core.redis_state import get_redis
-        try:
-            session_store = await get_redis()
-            active_session = await session_store.get(f"auth:session:{user_id}")
-            if active_session and not hmac.compare_digest(str(active_session), str(session_id)):
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired or replaced")
-            await session_store.expire(f"auth:session:{user_id}", 900)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.debug("Session store check skipped: %s", exc)
-
+    await validate_session(payload)
+    hospital_id = str(user.hospital_id) if user.hospital_id else None
+    if hospital_id != payload.get("hospital_id") or user.role != payload.get("role"):
+        raise HTTPException(status_code=401, detail="Account membership changed; sign in again")
+    from app.models.tenant import Hospital
+    hospital = (await db.execute(select(Hospital).where(Hospital.id == hospital_id))).scalar_one_or_none()
+    if hospital is None or not hospital.is_active or hospital.is_deleted:
+        raise HTTPException(status_code=401, detail="Hospital account is inactive")
+    revoked_after = (await db.execute(text(
+        "SELECT tokens_valid_after FROM users WHERE id=:uid"
+    ), {"uid": user_id})).scalar_one_or_none()
     issued_at = payload.get("iat")
-    # Read additive migration fields without selecting them in the ORM model,
-    # so pre-003 databases continue to authenticate during rolling deployment.
-    columns = (await db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name IN ('hospital_id','tokens_valid_after')"))).scalars().all()
-    if "hospital_id" in columns:
-        hospital_id = (await db.execute(text("SELECT hospital_id FROM users WHERE id=:uid"), {"uid": user_id})).scalar_one_or_none()
-        if hospital_id:
-            await db.execute(text("SELECT set_config('app.hospital_id', :hospital_id, true)"), {"hospital_id": str(hospital_id)})
-    revoked_after = None
-    if "tokens_valid_after" in columns:
-        revoked_after = (await db.execute(text("SELECT tokens_valid_after FROM users WHERE id=:uid"), {"uid": user_id})).scalar_one_or_none()
-    if revoked_after and issued_at and datetime.fromtimestamp(float(issued_at), timezone.utc) <= revoked_after:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
+    if revoked_after and issued_at and datetime.fromtimestamp(float(issued_at), UTC) <= revoked_after:
+        raise HTTPException(status_code=401, detail="Token has been revoked")
+    from app.core.tenant_context import current_hospital
+    current_hospital.set({"hospital_id": hospital_id, "abdm_env": hospital.abdm_env,
+                          "hip_id": hospital.hip_id, "hiu_id": hospital.hiu_id,
+                          "hfr_facility_id": hospital.hfr_facility_id})
 
     return {
         "user_id": user_id,
@@ -275,6 +283,7 @@ async def get_current_user(
         "permissions": payload.get("permissions", []),
         "jti": jti,
         "db_user": user,
+        "hospital_id": hospital_id,
     }
 
 
@@ -283,8 +292,8 @@ def require_roles(*allowed_roles: str):
     listed roles."""
 
     async def _checker(
-        current_user: Dict[str, Any] = Depends(get_current_user),
-    ) -> Dict[str, Any]:
+        current_user: dict[str, Any] = Depends(get_current_user),
+    ) -> dict[str, Any]:
         if current_user["role"] not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -300,9 +309,9 @@ def require_permissions(*required_permissions: str):
     the listed permissions."""
 
     async def _checker(
-        current_user: Dict[str, Any] = Depends(get_current_user),
-    ) -> Dict[str, Any]:
-        user_permissions: Set[str] = set(current_user.get("permissions", []))
+        current_user: dict[str, Any] = Depends(get_current_user),
+    ) -> dict[str, Any]:
+        user_permissions: set[str] = set(current_user.get("permissions", []))
         missing = set(required_permissions) - user_permissions
         if missing:
             raise HTTPException(

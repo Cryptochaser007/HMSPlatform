@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +21,9 @@ from app.core.dependencies import RateLimiter
 from app.core.rbac import Permission
 from app.core.security import get_current_user, require_permissions
 
-router = APIRouter(prefix="/abdm", tags=["ABDM v3 Integration (M1 / M2 / M3)"])
+public_router = APIRouter(tags=["ABDM status"])
+router = APIRouter(prefix="/abdm", tags=["ABDM v3 Integration (M1 / M2 / M3)"],
+                   dependencies=[Depends(get_current_user)])
 
 _RE_DANGEROUS = re.compile(r"[<>\"';`]")
 
@@ -40,7 +43,7 @@ class AadhaarOTPRequest(BaseModel):
 class VerifyOTPRequest(BaseModel):
     txn_id: str = Field(..., min_length=4, max_length=120)
     otp: str = Field(..., min_length=6, max_length=6)
-    mobile: Optional[str] = Field(default=None, max_length=15)
+    mobile: str | None = Field(default=None, max_length=15)
 
     @field_validator("otp")
     @classmethod
@@ -94,8 +97,8 @@ class AbhaAddressEnrollRequest(BaseModel):
 # =============================================================================
 
 
-@router.get("/status")
-async def get_abdm_status() -> Dict[str, Any]:
+@public_router.get("/abdm/status")
+async def get_abdm_status() -> dict[str, Any]:
     """Return active ABDM adapter mode (MOCK | SANDBOX | PRODUCTION) and safe gateway metadata."""
     return get_abdm_settings().public_status()
 
@@ -111,7 +114,7 @@ async def get_abdm_status() -> Dict[str, Any]:
 )
 async def generate_aadhaar_otp(
     data: AadhaarOTPRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Request OTP from UIDAI via ABDM v3 for Aadhaar-based ABHA creation."""
     try:
         return await abha_service.generate_aadhaar_otp(data.aadhaar_number)
@@ -125,7 +128,7 @@ async def generate_aadhaar_otp(
 )
 async def verify_aadhaar_otp(
     data: VerifyOTPRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Verify Aadhaar OTP to create / fetch ABHA v3 e-KYC profile."""
     try:
         return await abha_service.verify_aadhaar_otp(data.txn_id, data.otp, mobile=data.mobile)
@@ -139,7 +142,7 @@ async def verify_aadhaar_otp(
 )
 async def generate_mobile_otp(
     data: MobileOTPRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Request OTP for ABDM v3 mobile-based ABHA login / registration."""
     try:
         return await abha_service.generate_mobile_otp(data.mobile_number)
@@ -153,7 +156,7 @@ async def generate_mobile_otp(
 )
 async def verify_mobile_otp(
     data: VerifyOTPRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Verify ABDM v3 mobile OTP."""
     try:
         return await abha_service.verify_mobile_otp(data.txn_id, data.otp)
@@ -167,7 +170,7 @@ async def verify_mobile_otp(
 )
 async def search_abha_address(
     data: AbhaSearchRequest,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Search / verify ABHA Address (@abdm / @sbx) or 14-digit ABHA Number via ABDM v3."""
     try:
         return await abha_service.search_by_health_id(data.abha_id)
@@ -181,7 +184,7 @@ async def search_abha_address(
 )
 async def get_abha_profile(
     abha_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Fetch ABHA v3 demographic details from ABDM gateway."""
     if _RE_DANGEROUS.search(abha_id):
         raise HTTPException(status_code=422, detail="Invalid ABHA identifier format")
@@ -199,7 +202,7 @@ async def get_abha_profile(
 async def link_verified_abha_to_patient(
     data: LinkPatientAbhaRequest,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Persist verified 14-digit ABHA Number, ABHA Address, KYC status & timestamp on Patient."""
     try:
         return await abha_service.link_verified_abha_to_patient(
@@ -228,9 +231,9 @@ async def link_verified_abha_to_patient(
 )
 async def request_patient_consent_hiu(
     data: ConsentRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Initiate ABDM Consent Manager request to fetch longitudinal health records."""
     db_user = current_user.get("db_user")
     try:
@@ -250,9 +253,9 @@ async def request_patient_consent_hiu(
     dependencies=[Depends(require_permissions(Permission.ABDM_FETCH.value))],
 )
 async def list_hiu_consents(
-    patient_abha: Optional[str] = Query(None),
+    patient_abha: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List HIU consent artefacts and statuses for clinical review."""
     items = await hiu_service.list_consents(db, patient_abha=patient_abha)
     return {"items": items, "total": len(items)}
@@ -264,9 +267,9 @@ async def list_hiu_consents(
 )
 async def fetch_hiu_health_info(
     data: HIUFetchRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Request health info using Fidelius Curve25519 keypair and decrypt incoming FHIR R4 bundles."""
     try:
         return await hiu_service.fetch_health_info(
@@ -282,7 +285,7 @@ async def fetch_hiu_health_info(
 )
 async def get_hiu_longitudinal_records(
     patient_abha: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return decrypted FHIR R4 Longitudinal Health Record timeline for the Doctor EMR."""
     if _RE_DANGEROUS.search(patient_abha):
         raise HTTPException(status_code=422, detail="Invalid ABHA address")
@@ -302,7 +305,7 @@ async def get_hiu_longitudinal_records(
 async def list_abdm_transaction_logs(
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Retrieve immutable, PII-masked ABDM API transaction logs for WASA / NHA Exit audits."""
     try:
         from app.models.abdm import ABDMTransactionLog
@@ -333,6 +336,7 @@ async def list_abdm_transaction_logs(
         ]
         return {"items": items, "total": len(items)}
     except Exception:
+        logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         return {"items": [], "total": 0, "note": "Run migrations/002_abdm_v3_exit_compliance.sql to persist logs"}
 
 
@@ -343,7 +347,7 @@ async def list_abdm_transaction_logs(
 async def verify_doctor_hpr(
     registration_number: str = Query(...),
     council: str = Query("National Medical Commission"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Verify doctor credentials against National Healthcare Professional Registry."""
     profile = await hpr_service.verify_doctor(registration_number, council)
     return profile.model_dump()
@@ -386,10 +390,10 @@ class DemographicEnrolRequest(BaseModel):
     date_of_birth: str = Field(..., description="YYYY-MM-DD format", pattern=r"^\d{4}-\d{2}-\d{2}$")
     gender: str = Field(..., pattern="^[MFO]$")
     mobile: str = Field(..., min_length=10, max_length=15)
-    state_code: Optional[str] = Field(default=None, max_length=10)
-    district_code: Optional[str] = Field(default=None, max_length=10)
-    address: Optional[str] = Field(default=None, max_length=500)
-    pincode: Optional[str] = Field(default=None, max_length=10)
+    state_code: str | None = Field(default=None, max_length=10)
+    district_code: str | None = Field(default=None, max_length=10)
+    address: str | None = Field(default=None, max_length=500)
+    pincode: str | None = Field(default=None, max_length=10)
     consent_given: bool = Field(..., description="CRT_ABHA_302: User consent must be collected before enrolment")
 
     @field_validator("aadhaar_number")
@@ -606,7 +610,7 @@ async def get_abha_address_suggestions(
 async def enrol_abha_address(
     data: AbhaAddressEnrollRequest,
     current_user: dict = Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Select and enrol an ABHA address suggested for the active transaction."""
     try:
         return await abha_service.enrol_abha_address(

@@ -27,6 +27,8 @@ const api = axios.create({
   },
 });
 
+let refreshInFlight: Promise<unknown> | null = null;
+
 // Response Interceptor: Catch 401 and redirect to Login
 api.interceptors.response.use(
   (response) => response,
@@ -39,10 +41,16 @@ api.interceptors.response.use(
       originalRequest._sessionRetry = true;
       try {
         // Refresh uses the HttpOnly refresh cookie and XSRF double-submit header.
-        await api.post('/auth/refresh');
+        if (!refreshInFlight) {
+          refreshInFlight = api.post('/auth/refresh').finally(() => { refreshInFlight = null; });
+        }
+        await refreshInFlight;
         return api.request(originalRequest);
-      } catch {
-        if (!window.location.pathname.includes('/login')) window.location.href = '/login';
+      } catch (refreshError: any) {
+        if (refreshError.response?.status === 401 && !window.location.pathname.includes('/login')) {
+          window.location.href = '/login';
+        }
+        return Promise.reject(refreshError);
       }
     } else if (error.response?.status === 401 && !window.location.pathname.includes('/login')) {
       window.location.href = '/login';
@@ -52,6 +60,10 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
+  registerHospital: async (data: {
+    hospital_name: string; slug: string; admin_name: string;
+    admin_email: string; admin_password: string;
+  }): Promise<void> => { await api.post('/tenants/register', data); },
   login: async (email: string, password: string): Promise<void> => {
     await api.post('/auth/login', { email, password });
   },

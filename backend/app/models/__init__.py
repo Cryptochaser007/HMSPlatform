@@ -1,39 +1,131 @@
 """Central model registry — import all models for Alembic auto-detection."""
 
-from app.models.user import User
-from app.models.patient import Patient, Gender
-from app.models.encounter import Encounter, EncounterType, EncounterStatus, EncounterPriority
-from app.models.clinical import ClinicalNote, NoteType, Prescription, PrescriptionStatus, PrescriptionItem
-from app.models.pharmacy import Drug, DrugType, DrugInventory, Dispensing
-from app.models.laboratory import LabTest, LabOrder, LabOrderStatus, LabResult, LabPriority, ResultFlag
-from app.models.radiology import RadiologyOrder, RadiologyReport, Modality, RadiologyOrderStatus
-from app.models.billing import Bill, BillType, BillItem, BillItemType, Payment, PaymentMethod, PaymentStatus
-from app.models.ward import Ward, WardType, Bed, BedStatus, BedType, Admission, AdmissionStatus, DischargeType
-from app.models.quality import QualityIndicator, QualityMeasurement, IncidentReport, IncidentType, IncidentSeverity, IncidentStatus
-from app.models.consent import Consent, ConsentType, ConsentStatus
-from app.models.audit import AuditLog
 from app.models.abdm import (
-    ABDMShareProfile,
     ABDMCareContextLink,
     ABDMConsentArtefact,
+    ABDMShareProfile,
     ABDMTransactionLog,
 )
-from app.models.registry import HFRFacility, HPRPractitioner, Referral, InsurancePolicy, InsuranceClaim
+from app.models.audit import AuditLog
+from app.models.billing import (
+    Bill,
+    BillItem,
+    BillItemType,
+    BillType,
+    Payment,
+    PaymentMethod,
+    PaymentStatus,
+)
+from app.models.clinical import (
+    ClinicalNote,
+    NoteType,
+    Prescription,
+    PrescriptionItem,
+    PrescriptionStatus,
+)
+from app.models.consent import Consent, ConsentStatus, ConsentType
+from app.models.encounter import Encounter, EncounterPriority, EncounterStatus, EncounterType
+from app.models.laboratory import (
+    LabOrder,
+    LabOrderStatus,
+    LabPriority,
+    LabResult,
+    LabTest,
+    ResultFlag,
+)
+from app.models.patient import Gender, Patient
+from app.models.pharmacy import Dispensing, Drug, DrugInventory, DrugType
+from app.models.quality import (
+    IncidentReport,
+    IncidentSeverity,
+    IncidentStatus,
+    IncidentType,
+    QualityIndicator,
+    QualityMeasurement,
+)
+from app.models.radiology import Modality, RadiologyOrder, RadiologyOrderStatus, RadiologyReport
+from app.models.registry import (
+    HFRFacility,
+    HPRPractitioner,
+    InsuranceClaim,
+    InsurancePolicy,
+    Referral,
+)
+from app.models.tenant import Department, Hospital
+from app.models.user import User
+from app.models.ward import (
+    Admission,
+    AdmissionStatus,
+    Bed,
+    BedStatus,
+    BedType,
+    DischargeType,
+    Ward,
+    WardType,
+)
 
 __all__ = [
-    "User",
-    "Patient", "Gender",
-    "Encounter", "EncounterType", "EncounterStatus", "EncounterPriority",
-    "ClinicalNote", "NoteType", "Prescription", "PrescriptionStatus", "PrescriptionItem",
-    "Drug", "DrugType", "DrugInventory", "Dispensing",
-    "LabTest", "LabOrder", "LabOrderStatus", "LabResult", "LabPriority", "ResultFlag",
-    "RadiologyOrder", "RadiologyReport", "Modality", "RadiologyOrderStatus",
-    "Bill", "BillType", "BillItem", "BillItemType", "Payment", "PaymentMethod", "PaymentStatus",
-    "Ward", "WardType", "Bed", "BedStatus", "BedType", "Admission", "AdmissionStatus", "DischargeType",
-    "QualityIndicator", "QualityMeasurement", "IncidentReport", "IncidentType", "IncidentSeverity", "IncidentStatus",
-    "Consent", "ConsentType", "ConsentStatus",
+    "ABDMCareContextLink",
+    "ABDMConsentArtefact",
+    "ABDMShareProfile",
+    "ABDMTransactionLog",
+    "Admission",
+    "AdmissionStatus",
     "AuditLog",
-    "ABDMShareProfile", "ABDMCareContextLink", "ABDMConsentArtefact", "ABDMTransactionLog",
-    "HFRFacility", "HPRPractitioner", "Referral", "InsurancePolicy", "InsuranceClaim",
+    "Bed",
+    "BedStatus",
+    "BedType",
+    "Bill",
+    "BillItem",
+    "BillItemType",
+    "BillType",
+    "ClinicalNote",
+    "Consent",
+    "ConsentStatus",
+    "ConsentType",
+    "Department",
+    "DischargeType",
+    "Dispensing",
+    "Drug",
+    "DrugInventory",
+    "DrugType",
+    "Encounter",
+    "EncounterPriority",
+    "EncounterStatus",
+    "EncounterType",
+    "Gender",
+    "HFRFacility",
+    "HPRPractitioner",
+    "Hospital",
+    "IncidentReport",
+    "IncidentSeverity",
+    "IncidentStatus",
+    "IncidentType",
+    "InsuranceClaim",
+    "InsurancePolicy",
+    "LabOrder",
+    "LabOrderStatus",
+    "LabPriority",
+    "LabResult",
+    "LabTest",
+    "Modality",
+    "NoteType",
+    "Patient",
+    "Payment",
+    "PaymentMethod",
+    "PaymentStatus",
+    "Prescription",
+    "PrescriptionItem",
+    "PrescriptionStatus",
+    "QualityIndicator",
+    "QualityMeasurement",
+    "RadiologyOrder",
+    "RadiologyOrderStatus",
+    "RadiologyReport",
+    "Referral",
+    "ResultFlag",
+    "User",
+    "Ward",
+    "WardType",
 ]
 

@@ -1,20 +1,20 @@
 """Authentication, JWT tokens, and User lifecycle endpoints."""
 
-from typing import Any, Dict
-from datetime import datetime, timezone
-
-import secrets
 import hmac
+import logging
+import secrets
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit import AuditAction, audit_log, get_audit_logger
-from app.core.database import get_db
+from app.core.audit import AuditAction, get_audit_logger
 from app.core.config import get_settings
+from app.core.database import get_db
 from app.core.dependencies import RateLimiter
 from app.core.rbac import Permission, Role
-from app.core.security import decode_token, get_current_user, require_permissions, require_roles
-from app.schemas.user import ChangePassword, Token, UserCreate, UserLogin, UserResponse
+from app.core.security import decode_token, get_current_user, require_permissions
+from app.schemas.user import ChangePassword, UserCreate, UserLogin, UserResponse
 from app.services.auth_service import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -22,10 +22,10 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 async def _activate_single_session(user_id: str, access_token: str) -> str:
     """Store the current session ID with a 15-minute idle sliding window."""
-    from app.core.redis_state import get_redis
+    from app.core.security import security_redis
     payload = decode_token(access_token)
     sid = str(payload["sid"])
-    redis_client = await get_redis()
+    redis_client = await security_redis()
     await redis_client.set(f"auth:session:{user_id}", sid, ex=900)
     return sid
 
@@ -39,7 +39,7 @@ async def login(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Authenticate user with email and password, returning JWT access and refresh tokens."""
     user = await auth_service.authenticate_user(db, credentials.email, credentials.password)
     tokens = auth_service.create_tokens(user)
@@ -57,11 +57,11 @@ async def login(
         user_agent=request.headers.get("user-agent"),
     )
     secure = request.url.scheme == "https" or get_settings().ENVIRONMENT.lower() == "production"
-    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=900, path="/")
+    response.set_cookie("access_token", tokens.access_token, httponly=True, secure=secure, samesite="strict", max_age=1800, path="/")
     response.set_cookie("refresh_token", tokens.refresh_token, httponly=True, secure=secure, samesite="strict", max_age=604800, path="/api/v1/auth")
     response.set_cookie("csrf_token", secrets.token_urlsafe(32), httponly=False, secure=secure, samesite="strict", max_age=604800, path="/")
-    from app.core.redis_state import get_redis
-    failed_epoch = await (await get_redis()).get(f"auth:lockout:{credentials.email.strip().lower()}:last_failed")
+    from app.core.security import security_redis
+    failed_epoch = await (await security_redis()).get(f"auth:fail:{credentials.email.strip().lower()}:last_failed")
     from sqlalchemy import text
     # Vercel deploys application code but does not apply PostgreSQL migrations.
     # Keep existing users able to sign in until the additive 003 migration has
@@ -77,11 +77,11 @@ async def login(
             {"uid": str(user.id)},
         )
         last_failed = durable_failed.scalar_one_or_none()
-    previous_login = getattr(user, "_previous_last_login", None)
+    previous_login = db.info.get("previous_last_login")
     return {
         "authenticated": True,
         "last_successful_login": previous_login.isoformat() if previous_login else None,
-        "last_failed_login": last_failed.isoformat() if last_failed else (datetime.fromtimestamp(int(failed_epoch), timezone.utc).isoformat() if failed_epoch else None),
+        "last_failed_login": last_failed.isoformat() if last_failed else (failed_epoch if failed_epoch else None),
     }
 
 
@@ -93,7 +93,7 @@ async def refresh_token(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, bool]:
+) -> dict[str, bool]:
     """Exchange a valid refresh token for a new access token."""
     token = request.cookies.get("refresh_token")
     if not token:
@@ -102,17 +102,6 @@ async def refresh_token(
     csrf_header = request.headers.get("X-CSRF-Token", "")
     if not csrf_cookie or not hmac.compare_digest(csrf_cookie, csrf_header):
         raise HTTPException(status_code=403, detail="CSRF validation failed")
-    try:
-        refresh_claims = decode_token(token)
-        from app.core.redis_state import get_redis
-        sessions = await get_redis()
-        active_sid = await sessions.get(f"auth:session:{refresh_claims.get('sub')}")
-        if not refresh_claims.get("sid") or not active_sid or not hmac.compare_digest(str(active_sid), str(refresh_claims["sid"])):
-            raise HTTPException(status_code=401, detail="Refresh session expired or replaced")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail="Invalid refresh session") from exc
     tokens = await auth_service.refresh_access_token(db, token)
     decoded = decode_token(tokens.access_token)
     await _activate_single_session(str(decoded["sub"]), tokens.access_token)
@@ -127,26 +116,27 @@ async def refresh_token(
 async def logout(
     request: Request,
     response: Response,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Blacklist the active JWT access token."""
     jti = current_user.get("jti")
     if jti:
         await auth_service.blacklist_token(jti)
-    from app.core.redis_state import get_redis
-    await (await get_redis()).delete(f"auth:session:{current_user['user_id']}")
+    from app.core.security import security_redis
+    await (await security_redis()).delete(f"auth:session:{current_user['user_id']}")
     refresh = request.cookies.get("refresh_token")
     if refresh:
         try:
             refresh_payload = decode_token(refresh)
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             refresh_payload = {}
         refresh_jti = refresh_payload.get("jti")
         expires = refresh_payload.get("exp")
         if refresh_payload.get("type") == "refresh" and refresh_jti:
             import time
-            await auth_service.blacklist_token(refresh_jti, max(int(expires - time.time()), 60))
+            await auth_service.blacklist_token(refresh_jti, max(int((expires or 0) - time.time()), 60))
 
     logger = await get_audit_logger()
     await logger.log(
@@ -168,7 +158,7 @@ async def logout(
     "/signup",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(RateLimiter(times=5, seconds=60))],
+    dependencies=[Depends(RateLimiter(times=5, seconds=60)), Depends(require_permissions(Permission.USER_MANAGE.value))],
 )
 async def signup(
     data: UserCreate,
@@ -205,7 +195,7 @@ async def signup(
 )
 async def register_staff_user(
     data: UserCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Register hospital staff account (Restricted to Hospital Administrators)."""
@@ -225,27 +215,21 @@ async def register_staff_user(
 
 @router.get("/me", response_model=UserResponse)
 async def get_my_profile(
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
 ) -> UserResponse:
     """Return profile and permissions of authenticated user."""
     db_user = current_user.get("db_user")
     if db_user:
         return UserResponse.model_validate(db_user)
-    return UserResponse(
-        id=current_user.get("user_id") or current_user.get("id", ""),
-        email=current_user.get("email", "admin@hms.local"),
-        name=current_user.get("name") or current_user.get("username", "Admin"),
-        role=current_user.get("role") or (current_user.get("roles", ["SUPER_ADMIN"])[0]),
-        is_active=True,
-    )
+    raise HTTPException(status_code=401, detail="Authenticated user profile is unavailable")
 
 
 @router.put("/change-password")
 async def change_password(
     data: ChangePassword,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Update current user's password."""
     await auth_service.change_password(
         db, current_user["user_id"], data.old_password, data.new_password

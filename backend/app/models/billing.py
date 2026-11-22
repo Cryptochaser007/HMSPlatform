@@ -2,12 +2,14 @@
 
 import enum
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from app.core.database import Base, TenantOwned
 
 
 class BillType(str, enum.Enum):
@@ -47,24 +49,24 @@ class PaymentMethod(str, enum.Enum):
     CHEQUE = "CHEQUE"
 
 
-class Bill(Base):
+class Bill(TenantOwned, Base):
     __tablename__ = "bills"
 
-    bill_number = Column(String(50), unique=True, nullable=False, index=True)
-    encounter_id = Column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=True)
-    patient_id = Column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
-    bill_type = Column(SAEnum(BillType, name="bill_type_enum"), nullable=False)
-    subtotal = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
-    discount_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
-    tax_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
-    total_amount = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
-    payment_status = Column(
+    bill_number: Mapped[Any] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    encounter_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=True)
+    patient_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
+    bill_type: Mapped[Any] = mapped_column(SAEnum(BillType, name="bill_type_enum"), nullable=False)
+    subtotal: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    discount_amount: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    tax_amount: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    total_amount: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
+    payment_status: Mapped[Any] = mapped_column(
         SAEnum(PaymentStatus, name="payment_status_enum"),
         nullable=False,
         default=PaymentStatus.PENDING,
     )
-    notes = Column(Text, nullable=True)
-    created_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    notes: Mapped[Any] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
 
     # Relationships
     encounter = relationship("Encounter", back_populates="bills")
@@ -77,18 +79,18 @@ class Bill(Base):
         return f"<Bill {self.bill_number} total={self.total_amount}>"
 
 
-class BillItem(Base):
+class BillItem(TenantOwned, Base):
     __tablename__ = "bill_items"
 
-    bill_id = Column(UUID(as_uuid=False), ForeignKey("bills.id"), nullable=False, index=True)
-    item_type = Column(SAEnum(BillItemType, name="bill_item_type_enum"), nullable=False)
-    description = Column(String(500), nullable=False)
-    quantity = Column(Integer, nullable=False, default=1)
-    unit_price = Column(Numeric(10, 2), nullable=False)
-    discount_percent = Column(Numeric(5, 2), nullable=False, default=Decimal("0.00"))
-    tax_percent = Column(Numeric(5, 2), nullable=False, default=Decimal("0.00"))
-    total = Column(Numeric(10, 2), nullable=False)
-    reference_id = Column(UUID(as_uuid=False), nullable=True)  # FK to related entity
+    bill_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("bills.id"), nullable=False, index=True)
+    item_type: Mapped[Any] = mapped_column(SAEnum(BillItemType, name="bill_item_type_enum"), nullable=False)
+    description: Mapped[Any] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[Any] = mapped_column(Integer, nullable=False, default=1)
+    unit_price: Mapped[Any] = mapped_column(Numeric(10, 2), nullable=False)
+    discount_percent: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("0.00"))
+    tax_percent: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("0.00"))
+    total: Mapped[Any] = mapped_column(Numeric(10, 2), nullable=False)
+    reference_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), nullable=True)  # FK to related entity
 
     # Relationships
     bill = relationship("Bill", back_populates="items")
@@ -97,17 +99,17 @@ class BillItem(Base):
         return f"<BillItem {self.description} total={self.total}>"
 
 
-class Payment(Base):
+class Payment(TenantOwned, Base):
     __tablename__ = "payments"
 
-    bill_id = Column(UUID(as_uuid=False), ForeignKey("bills.id"), nullable=False, index=True)
-    amount = Column(Numeric(12, 2), nullable=False)
-    payment_method = Column(SAEnum(PaymentMethod, name="payment_method_enum"), nullable=False)
-    transaction_reference = Column(String(255), nullable=True)
-    payment_date = Column(DateTime(timezone=True), nullable=False)
-    received_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
-    receipt_number = Column(String(50), unique=True, nullable=False, index=True)
-    notes = Column(Text, nullable=True)
+    bill_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("bills.id"), nullable=False, index=True)
+    amount: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False)
+    payment_method: Mapped[Any] = mapped_column(SAEnum(PaymentMethod, name="payment_method_enum"), nullable=False)
+    transaction_reference: Mapped[Any] = mapped_column(String(255), nullable=True)
+    payment_date: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    receipt_number: Mapped[Any] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    notes: Mapped[Any] = mapped_column(Text, nullable=True)
 
     # Relationships
     bill = relationship("Bill", back_populates="payments")

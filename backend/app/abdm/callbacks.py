@@ -8,8 +8,9 @@ acknowledgements, NHA signature verification, and WASA immutable transaction log
 
 from __future__ import annotations
 
+import logging
 from functools import wraps
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -37,8 +38,7 @@ async def verify_gateway_callback_request(request: Request) -> None:
         return
     path = request.url.path
     # Staff-initiated linking endpoints use normal HMS auth and are not gateway callbacks.
-    if (path.endswith("/hip/link/token") or path.endswith("/hip/link/carecontext")
-            or path.endswith("/patient-share/queue") or path.endswith("/links/context/add")):
+    if (path.endswith(("/hip/link/token", "/hip/link/carecontext", "/patient-share/queue", "/links/context/add"))):
         return
     client_ip = request.client.host if request.client else ""
     allowed = {part.strip() for part in config.abdm_gateway_allowed_ips.split(",") if part.strip()}
@@ -68,6 +68,7 @@ def idempotent_webhook(fn):
         try:
             acquired = await acquire_idempotency(request_id)
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             acquired = True
         if not acquired:
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content={"status": "ACCEPTED", "timestamp": utc_timestamp_iso(), "details": {"duplicate": True}})
@@ -77,14 +78,14 @@ def idempotent_webhook(fn):
                 redis_client = await get_redis()
                 await redis_client.set(f"abdm:idem:{request_id}", "done", ex=86400)
             except Exception:
-                pass
+                logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             return result
         except Exception:
             try:
                 redis_client = await get_redis()
                 await redis_client.delete(f"abdm:idem:{request_id}")
             except Exception:
-                pass
+                logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             raise
     return wrapped
 
@@ -92,13 +93,13 @@ def idempotent_webhook(fn):
 class CallbackAck(BaseModel):
     status: str = "ACCEPTED"
     timestamp: str
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 
 class HIPAddContextsRequest(BaseModel):
     patient_id: str = Field(..., min_length=1, max_length=100)
     abha_address: str = Field(..., min_length=4, max_length=255)
-    care_contexts: List[Dict[str, str]] = Field(..., min_length=1)
+    care_contexts: list[dict[str, str]] = Field(..., min_length=1)
 
 
 class HIPLinkTokenRequest(BaseModel):
@@ -118,9 +119,9 @@ class HIPLinkTokenRequest(BaseModel):
 )
 @idempotent_webhook
 async def v3_hip_patient_share(
-    body: Dict[str, Any],
+    body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """M1 ABHA QR Scan & Share webhook receiver for instant OPD counter check-in."""
     try:
         return await abha_service.handle_patient_share(db, body)
@@ -134,7 +135,7 @@ async def v3_hip_patient_share(
 )
 async def get_patient_share_queue(
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Fetch live ABHA QR Scan & Share OPD check-in queue."""
     items = await abha_service.list_share_queue(db)
     return {"items": items, "total": len(items)}
@@ -149,7 +150,7 @@ async def get_patient_share_queue(
 @router.post("/v0.5/care-contexts/discover", status_code=status.HTTP_202_ACCEPTED)
 @idempotent_webhook
 async def hip_care_contexts_discover(
-    body: Dict[str, Any],
+    body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> CallbackAck:
     """M2 HIP Discovery webhook: matches local patient and dispatches on-discover."""
@@ -161,7 +162,7 @@ async def hip_care_contexts_discover(
 @router.post("/v0.5/care-contexts/on-discover", response_model=CallbackAck)
 @router.post("/v0.5/patients/on-discover", response_model=CallbackAck)
 @idempotent_webhook
-async def on_discover_callback(body: Dict[str, Any]) -> CallbackAck:
+async def on_discover_callback(body: dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-discover."""
     return CallbackAck(timestamp=utc_timestamp_iso())
 
@@ -170,7 +171,7 @@ async def on_discover_callback(body: Dict[str, Any]) -> CallbackAck:
 @router.post("/v0.5/links/link/init", status_code=status.HTTP_202_ACCEPTED)
 @idempotent_webhook
 async def hip_link_init(
-    body: Dict[str, Any],
+    body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> CallbackAck:
     """M2 HIP Link Init webhook: issues link reference & OTP, dispatches on-init."""
@@ -181,7 +182,7 @@ async def hip_link_init(
 @router.post("/v3/hip/link/care-context/on-init", response_model=CallbackAck)
 @router.post("/v0.5/links/link/on-init", response_model=CallbackAck)
 @idempotent_webhook
-async def on_link_init_callback(body: Dict[str, Any]) -> CallbackAck:
+async def on_link_init_callback(body: dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-init."""
     return CallbackAck(timestamp=utc_timestamp_iso())
 
@@ -190,7 +191,7 @@ async def on_link_init_callback(body: Dict[str, Any]) -> CallbackAck:
 @router.post("/v0.5/links/link/confirm", status_code=status.HTTP_202_ACCEPTED)
 @idempotent_webhook
 async def hip_link_confirm(
-    body: Dict[str, Any],
+    body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> CallbackAck:
     """M2 HIP Link Confirm webhook: verifies OTP and marks care contexts LINKED."""
@@ -201,7 +202,7 @@ async def hip_link_confirm(
 @router.post("/v3/hip/link/care-context/on-confirm", response_model=CallbackAck)
 @router.post("/v0.5/links/link/on-confirm", response_model=CallbackAck)
 @idempotent_webhook
-async def on_link_confirm_callback(body: Dict[str, Any]) -> CallbackAck:
+async def on_link_confirm_callback(body: dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-confirm."""
     return CallbackAck(timestamp=utc_timestamp_iso())
 
@@ -213,9 +214,9 @@ async def on_link_confirm_callback(body: Dict[str, Any]) -> CallbackAck:
 )
 async def hip_initiated_context_add(
     data: HIPAddContextsRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """M2 HIP-initiated linking: push new encounter care contexts to patient's ABHA."""
     try:
         return await hip_service.hip_add_care_contexts(
@@ -232,8 +233,8 @@ async def hip_initiated_context_add(
 @router.post("/v3/hip/link/token", dependencies=[Depends(require_permissions(Permission.ABDM_LINK.value))])
 async def hip_link_token_request(
     data: HIPLinkTokenRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-) -> Dict[str, Any]:
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     try:
         return await hip_service.generate_link_token(
             patient_id=data.patient_id, abha_address=data.abha_address, user_id=current_user["user_id"]
@@ -245,9 +246,9 @@ async def hip_link_token_request(
 @router.post("/v3/hip/link/carecontext", dependencies=[Depends(require_permissions(Permission.ABDM_LINK.value))])
 async def hip_link_care_context_v3(
     data: HIPAddContextsRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     from app.core.redis_state import get_redis
     token = await (await get_redis()).get(f"abdm:hip:link-token:{data.patient_id}")
     if not token:
@@ -266,7 +267,7 @@ async def hip_link_care_context_v3(
 
 @router.post("/v3/hip/token/on-generate-token", response_model=CallbackAck)
 @idempotent_webhook
-async def hip_token_generated(body: Dict[str, Any]) -> CallbackAck:
+async def hip_token_generated(body: dict[str, Any]) -> CallbackAck:
     """Cache HIP linkToken delivered asynchronously by the gateway."""
     patient = body.get("patient") or body.get("link") or {}
     reference = patient.get("referenceNumber") or body.get("referenceNumber")
@@ -284,7 +285,7 @@ async def hip_token_generated(body: Dict[str, Any]) -> CallbackAck:
 
 @router.post("/v3/link/on_carecontext", response_model=CallbackAck)
 @idempotent_webhook
-async def hip_care_context_linked(body: Dict[str, Any]) -> CallbackAck:
+async def hip_care_context_linked(body: dict[str, Any]) -> CallbackAck:
     """Acknowledge the gateway response for HIP initiated care-context linking."""
     return CallbackAck(timestamp=utc_timestamp_iso(), details={"requestId": body.get("requestId")})
 
@@ -299,8 +300,8 @@ async def hip_care_context_linked(body: Dict[str, Any]) -> CallbackAck:
 @idempotent_webhook
 async def hip_consent_notify(
     request: Request,
-    body: Dict[str, Any],
-    x_abdm_signature: Optional[str] = Header(None, alias="X-ABDM-Signature"),
+    body: dict[str, Any],
+    x_abdm_signature: str | None = Header(None, alias="X-ABDM-Signature"),
     db: AsyncSession = Depends(get_db),
 ) -> CallbackAck:
     """M2 HIP Consent Notification webhook with signature check and immutable artefact storage."""
@@ -317,7 +318,7 @@ async def hip_consent_notify(
 @router.post("/v0.5/consents/hip/on-notify", response_model=CallbackAck)
 @router.post("/v0.5/consent-requests/on-notify", response_model=CallbackAck)
 @idempotent_webhook
-async def hip_consent_on_notify_callback(body: Dict[str, Any]) -> CallbackAck:
+async def hip_consent_on_notify_callback(body: dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for consent on-notify."""
     return CallbackAck(timestamp=utc_timestamp_iso())
 
@@ -327,7 +328,7 @@ async def hip_consent_on_notify_callback(body: Dict[str, Any]) -> CallbackAck:
 @router.post("/v0.5/health-information/request", status_code=status.HTTP_202_ACCEPTED)
 @idempotent_webhook
 async def hip_health_information_request(
-    body: Dict[str, Any],
+    body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
 ) -> CallbackAck:
     """M2 HIP Health Info Request: builds FHIR R4 bundles, encrypts via Fidelius, pushes to HIU."""
@@ -341,7 +342,7 @@ async def hip_health_information_request(
 @router.post("/v0.5/health-information/hip/on-request", response_model=CallbackAck)
 @router.post("/v0.5/health-information/notify", response_model=CallbackAck)
 @idempotent_webhook
-async def hip_health_info_ack(body: Dict[str, Any]) -> CallbackAck:
+async def hip_health_info_ack(body: dict[str, Any]) -> CallbackAck:
     """Gateway acknowledgement for on-request / delivery notify."""
     return CallbackAck(timestamp=utc_timestamp_iso())
 
@@ -356,8 +357,8 @@ async def hip_health_info_ack(body: Dict[str, Any]) -> CallbackAck:
 @idempotent_webhook
 async def hiu_consent_notify(
     request: Request,
-    body: Dict[str, Any],
-    x_abdm_signature: Optional[str] = Header(None, alias="X-ABDM-Signature"),
+    body: dict[str, Any],
+    x_abdm_signature: str | None = Header(None, alias="X-ABDM-Signature"),
     db: AsyncSession = Depends(get_db),
 ) -> CallbackAck:
     """M3 HIU Consent Approval/Denial/Revocation webhook from Consent Manager."""
@@ -373,7 +374,7 @@ async def hiu_consent_notify(
 
 @router.post("/v3/hiu/consent/on-fetch", response_model=CallbackAck)
 @idempotent_webhook
-async def hiu_consent_on_fetch(body: Dict[str, Any], db: AsyncSession = Depends(get_db)) -> CallbackAck:
+async def hiu_consent_on_fetch(body: dict[str, Any], db: AsyncSession = Depends(get_db)) -> CallbackAck:
     """Persist signed consent artefacts returned by the v3 Consent Manager fetch."""
     request_block = body.get("consentRequest") or body
     request_id = request_block.get("consentRequestId") or body.get("consentRequestId")
@@ -381,6 +382,7 @@ async def hiu_consent_on_fetch(body: Dict[str, Any], db: AsyncSession = Depends(
     if request_id:
         try:
             from sqlalchemy import select
+
             from app.models.abdm import ABDMConsentArtefact
             row = (await db.execute(select(ABDMConsentArtefact).where(
                 ABDMConsentArtefact.consent_request_id == request_id
@@ -399,7 +401,7 @@ async def hiu_consent_on_fetch(body: Dict[str, Any], db: AsyncSession = Depends(
 @router.post("/v0.5/health-information/transfer", response_model=CallbackAck, status_code=status.HTTP_202_ACCEPTED)
 @idempotent_webhook
 async def hiu_health_information_transfer(
-    body: Dict[str, Any],
+    body: dict[str, Any],
 ) -> CallbackAck:
     """M3 HIU Data Push Receiver: decrypts incoming Fidelius-encrypted FHIR R4 bundles."""
     try:

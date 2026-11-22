@@ -15,14 +15,23 @@ Direct 1-to-1 mapping with official NHA ABDM Functional Testing Excel Matrix:
 
 from __future__ import annotations
 
-import pytest
-from fastapi.testclient import TestClient
+from uuid import uuid4
 
+import pytest
 from app.abdm.abha_service import abha_service
 from app.core.security import get_current_user
 from app.main import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def scoped_client():
+    global client
+    with TestClient(app) as scoped:
+        client = scoped
+        yield
 
 @pytest.fixture(autouse=True)
 def override_auth():
@@ -66,10 +75,12 @@ def test_crt_abha_105_otp_format_validation():
 
 def test_crt_abha_106_resend_otp():
     """CRT_ABHA_106: Resend OTP functionality for transaction."""
-    res = client.post("/api/v1/abdm/abha/resend-otp", json={"txn_id": "test-txn-123", "otp_system": "aadhaar"})
+    payload = {"txn_id": f"test-txn-{uuid4()}", "otp_system": "aadhaar"}
+    res = client.post("/api/v1/abdm/abha/resend-otp", json=payload)
     assert res.status_code == 200
     data = res.json()
     assert "txnId" in data or "txn_id" in data
+    assert client.post("/api/v1/abdm/abha/resend-otp", json=payload).status_code == 429
 
 
 def test_crt_abha_107_otp_based_authentication():
@@ -240,7 +251,7 @@ def test_vrfy_abha_301_305_communication_mobile_login():
 def test_share_patient_profile_701_qr_scan_and_share():
     """SHARE_PATIENT_PROFILE_701: Inbound QR Scan & Share webhook issuing instant OPD token."""
     payload = {
-        "requestId": "test-qr-req-001",
+        "requestId": f"test-qr-{uuid4()}",
         "intent": {"type": "PROFILE_SHARE"},
         "metaData": {"hipId": "HMS_HIP_SANDBOX", "context": "OPD-COUNTER-01"},
         "profile": {

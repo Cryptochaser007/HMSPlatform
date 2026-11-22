@@ -2,7 +2,8 @@
 import json
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
+
 import redis.asyncio as redis
 
 from app.core.config import get_settings
@@ -23,7 +24,7 @@ class InMemoryRedisFallback:
             self._store.pop(key, None)
             self._expiry.pop(key, None)
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         self._purge(key)
         return self._store.get(key)
 
@@ -31,7 +32,7 @@ class InMemoryRedisFallback:
         self,
         key: str,
         value: Any,
-        ex: Optional[int] = None,
+        ex: int | None = None,
         nx: bool = False,
     ) -> bool:
         self._purge(key)
@@ -93,6 +94,7 @@ async def get_redis():
             await _client.ping()
             return _client
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             _client = None
 
     try:
@@ -109,6 +111,7 @@ async def get_redis():
         _client = client
         return _client
     except Exception as exc:
+        logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         logger.debug("Redis unreachable, using in-memory store: %s", exc)
         return _fallback
 
@@ -118,7 +121,7 @@ async def put_json(key: str, value: Any, ttl: int) -> None:
     await client.set(key, json.dumps(value, separators=(",", ":")), ex=ttl)
 
 
-async def get_json(key: str) -> Optional[Any]:
+async def get_json(key: str) -> Any | None:
     client = await get_redis()
     value = await client.get(key)
     return json.loads(value) if value else None

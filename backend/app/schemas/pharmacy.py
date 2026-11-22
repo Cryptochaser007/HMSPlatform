@@ -2,7 +2,6 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,22 +9,22 @@ from pydantic import BaseModel, ConfigDict, Field
 class DrugCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     generic_name: str
-    brand_name: Optional[str] = None
+    brand_name: str | None = None
     drug_type: str
     strength: str
-    manufacturer: Optional[str] = None
-    hsn_code: Optional[str] = None
-    schedule: Optional[str] = None
+    manufacturer: str | None = None
+    hsn_code: str | None = None
+    schedule: str | None = None
 
 
 class DrugUpdate(BaseModel):
-    name: Optional[str] = None
-    generic_name: Optional[str] = None
-    brand_name: Optional[str] = None
-    drug_type: Optional[str] = None
-    strength: Optional[str] = None
-    manufacturer: Optional[str] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    generic_name: str | None = None
+    brand_name: str | None = None
+    drug_type: str | None = None
+    strength: str | None = None
+    manufacturer: str | None = None
+    is_active: bool | None = None
 
 
 class DrugResponse(BaseModel):
@@ -33,12 +32,12 @@ class DrugResponse(BaseModel):
     id: str
     name: str
     generic_name: str
-    brand_name: Optional[str] = None
+    brand_name: str | None = None
     drug_type: str
     strength: str
-    manufacturer: Optional[str] = None
-    hsn_code: Optional[str] = None
-    schedule: Optional[str] = None
+    manufacturer: str | None = None
+    hsn_code: str | None = None
+    schedule: str | None = None
     is_active: bool
     created_at: datetime
 
@@ -52,15 +51,15 @@ class DrugInventoryCreate(BaseModel):
     mrp: Decimal = Field(..., ge=0)
     gst_percentage: Decimal = Field(default=Decimal("12.00"), ge=0, le=100)
     reorder_level: int = Field(default=10, ge=0)
-    location: Optional[str] = None
+    location: str | None = None
 
 
 class DrugInventoryUpdate(BaseModel):
-    quantity_in_stock: Optional[int] = None
-    unit_price: Optional[Decimal] = None
-    mrp: Optional[Decimal] = None
-    reorder_level: Optional[int] = None
-    location: Optional[str] = None
+    quantity_in_stock: int | None = None
+    unit_price: Decimal | None = None
+    mrp: Decimal | None = None
+    reorder_level: int | None = None
+    location: str | None = None
 
 
 class DrugInventoryResponse(BaseModel):
@@ -74,7 +73,7 @@ class DrugInventoryResponse(BaseModel):
     mrp: Decimal
     gst_percentage: Decimal
     reorder_level: int
-    location: Optional[str] = None
+    location: str | None = None
     created_at: datetime
 
 
@@ -82,7 +81,7 @@ class DispensingCreate(BaseModel):
     prescription_item_id: str
     drug_inventory_id: str
     quantity: int = Field(..., ge=1)
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class DispensingResponse(BaseModel):
@@ -94,7 +93,7 @@ class DispensingResponse(BaseModel):
     dispensed_by: str
     quantity_dispensed: int
     dispensed_at: datetime
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class StockAlertResponse(BaseModel):
@@ -106,7 +105,7 @@ class StockAlertResponse(BaseModel):
 
 
 class DrugSearchParams(BaseModel):
-    name: Optional[str] = None
-    generic_name: Optional[str] = None
-    drug_type: Optional[str] = None
+    name: str | None = None
+    generic_name: str | None = None
+    drug_type: str | None = None
 

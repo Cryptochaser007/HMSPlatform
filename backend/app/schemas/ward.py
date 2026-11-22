@@ -2,7 +2,6 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,7 +11,7 @@ class WardCreate(BaseModel):
     ward_type: str
     floor: int
     total_beds: int = Field(..., ge=1)
-    department: Optional[str] = None
+    department: str | None = None
 
 
 class WardResponse(BaseModel):
@@ -22,7 +21,7 @@ class WardResponse(BaseModel):
     ward_type: str
     floor: int
     total_beds: int
-    department: Optional[str] = None
+    department: str | None = None
     is_active: bool
     created_at: datetime
 
@@ -45,12 +44,12 @@ class AdmissionCreate(BaseModel):
     encounter_id: str
     patient_id: str
     bed_id: str
-    expected_discharge: Optional[date] = None
+    expected_discharge: date | None = None
 
 
 class DischargeCreate(BaseModel):
     discharge_type: str
-    discharge_summary: Optional[str] = None
+    discharge_summary: str | None = None
 
 
 class AdmissionResponse(BaseModel):
@@ -61,9 +60,9 @@ class AdmissionResponse(BaseModel):
     bed_id: str
     admitted_by: str
     admission_date: datetime
-    expected_discharge: Optional[date] = None
-    actual_discharge: Optional[datetime] = None
-    discharge_type: Optional[str] = None
+    expected_discharge: date | None = None
+    actual_discharge: datetime | None = None
+    discharge_type: str | None = None
     status: str
     created_at: datetime
 
@@ -75,5 +74,5 @@ class BedOccupancyDashboard(BaseModel):
     maintenance: int
     reserved: int
     occupancy_rate: float
-    by_ward_type: List[dict]
+    by_ward_type: list[dict]
 

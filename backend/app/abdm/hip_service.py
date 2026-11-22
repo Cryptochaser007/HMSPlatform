@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -29,6 +29,7 @@ from app.abdm.fidelius import (
     generate_ephemeral_keypair,
     verify_nha_webhook_signature,
 )
+from app.core.tenant_context import tenant_cache_key
 from app.utils.fhir import (
     build_condition_resource,
     build_diagnostic_report_bundle,
@@ -47,7 +48,7 @@ from app.utils.fhir import (
 logger = logging.getLogger("abdm.hip")
 
 # Link state remains backed by ABDM care-context rows; never cache consent state per worker.
-_hip_links_memory: Dict[str, Dict[str, Any]] = {}
+_hip_links_memory: dict[str, dict[str, Any]] = {}
 
 
 class CareContext(BaseModel):
@@ -60,8 +61,8 @@ class CareContext(BaseModel):
 class DiscoverRequest(BaseModel):
     request_id: str = Field(..., alias="requestId")
     transaction_id: str = Field(..., alias="transactionId")
-    patient: Dict[str, Any]
-    timestamp: Optional[str] = None
+    patient: dict[str, Any]
+    timestamp: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -69,15 +70,15 @@ class DiscoverRequest(BaseModel):
 class DiscoverResponse(BaseModel):
     request_id: str
     transaction_id: str
-    patient: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, Any]] = None
+    patient: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 class LinkInitRequest(BaseModel):
     request_id: str = Field(..., alias="requestId")
     transaction_id: str = Field(..., alias="transactionId")
-    patient: Dict[str, Any]
-    timestamp: Optional[str] = None
+    patient: dict[str, Any]
+    timestamp: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -85,15 +86,15 @@ class LinkInitRequest(BaseModel):
 class LinkInitResponse(BaseModel):
     request_id: str
     transaction_id: str
-    link: Dict[str, Any] = Field(default_factory=dict)
-    error: Optional[Dict[str, Any]] = None
+    link: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None
 
 
 class LinkConfirmRequest(BaseModel):
     request_id: str = Field(..., alias="requestId")
     transaction_id: str = Field(..., alias="transactionId")
-    confirmation: Dict[str, Any]
-    timestamp: Optional[str] = None
+    confirmation: dict[str, Any]
+    timestamp: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -101,19 +102,19 @@ class LinkConfirmRequest(BaseModel):
 class LinkConfirmResponse(BaseModel):
     request_id: str
     transaction_id: str
-    patient: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, Any]] = None
+    patient: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
 
 
 class DataRequest(BaseModel):
     request_id: str = Field(..., alias="requestId")
     transaction_id: str = Field(..., alias="transactionId")
     consent_id: str
-    care_contexts: List[Dict[str, Any]] = Field(default_factory=list)
-    date_range: Dict[str, Any] = Field(default_factory=dict)
+    care_contexts: list[dict[str, Any]] = Field(default_factory=list)
+    date_range: dict[str, Any] = Field(default_factory=dict)
     data_push_url: str = ""
-    key_material: Dict[str, Any] = Field(default_factory=dict)
-    timestamp: Optional[str] = None
+    key_material: dict[str, Any] = Field(default_factory=dict)
+    timestamp: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -121,7 +122,7 @@ class DataRequest(BaseModel):
 class HIPService:
     """Health Information Provider (HIP) orchestrator for ABDM M2 certification."""
 
-    def __init__(self, client: Optional[ABDMClient] = None) -> None:
+    def __init__(self, client: ABDMClient | None = None) -> None:
         self._client = client or ABDMClient()
 
     # ------------------------------------------------------------------
@@ -129,8 +130,8 @@ class HIPService:
     # ------------------------------------------------------------------
 
     async def on_discover(
-        self, db: AsyncSession, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, db: AsyncSession, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         req_id = payload.get("requestId") or str(uuid.uuid4())
         txn_id = payload.get("transactionId") or str(uuid.uuid4())
         patient_in = payload.get("patient") or {}
@@ -155,7 +156,7 @@ class HIPService:
             db, abha_number=abha_number, abha_address=abha_address
         )
 
-        on_discover_body: Dict[str, Any] = {
+        on_discover_body: dict[str, Any] = {
             "requestId": str(uuid.uuid4()),
             "timestamp": utc_timestamp_iso(),
             "transactionId": txn_id,
@@ -188,8 +189,8 @@ class HIPService:
     # ------------------------------------------------------------------
 
     async def on_link_init(
-        self, db: AsyncSession, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, db: AsyncSession, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         req_id = payload.get("requestId") or str(uuid.uuid4())
         txn_id = payload.get("transactionId") or str(uuid.uuid4())
         patient_block = payload.get("patient") or {}
@@ -208,11 +209,11 @@ class HIPService:
         )
 
         link_ref = f"LINK-{uuid.uuid4().hex[:12].upper()}"
-        expiry = (datetime.now(timezone.utc) + timedelta(minutes=10)).strftime(
+        expiry = (datetime.now(UTC) + timedelta(minutes=10)).strftime(
             "%Y-%m-%dT%H:%M:%S.%f"
         )[:-3] + "Z"
 
-        _hip_links_memory[link_ref] = {
+        _hip_links_memory[tenant_cache_key(link_ref)] = {
             "patient_ref": patient_ref,
             "abha_address": abha_address,
             "care_contexts": care_contexts,
@@ -238,6 +239,7 @@ class HIPService:
                 )
             await db.flush()
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("Care context link DB persist fallback: %s", exc)
 
         on_init_body = {
@@ -264,8 +266,8 @@ class HIPService:
         return on_init_body
 
     async def on_link_confirm(
-        self, db: AsyncSession, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, db: AsyncSession, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         req_id = payload.get("requestId") or str(uuid.uuid4())
         confirmation = payload.get("confirmation") or {}
         link_ref = confirmation.get("linkRefNumber", "")
@@ -296,12 +298,12 @@ class HIPService:
             )
             return error_body
 
-        link_session = _hip_links_memory.get(link_ref) or {
+        link_session = _hip_links_memory.get(tenant_cache_key(link_ref)) or {
             "patient_ref": link_ref,
             "care_contexts": [],
         }
         link_session["status"] = "LINKED"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             from app.models.abdm import ABDMCareContextLink
@@ -323,6 +325,7 @@ class HIPService:
                     r.linked_at = now
                 await db.flush()
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("Link confirm DB update fallback: %s", exc)
 
         on_confirm_body = {
@@ -353,10 +356,10 @@ class HIPService:
         *,
         patient_id: str,
         abha_address: str,
-        care_contexts: List[Dict[str, str]],
-        link_access_token: Optional[str] = None,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        care_contexts: list[dict[str, str]],
+        link_access_token: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """Push newly created OPD/IPD care contexts from HIP to patient's ABHA locker."""
         req_id = str(uuid.uuid4())
         if len(care_contexts) > 20:
@@ -383,7 +386,7 @@ class HIPService:
             user_id=user_id,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         try:
             from app.models.abdm import ABDMCareContextLink
 
@@ -403,11 +406,12 @@ class HIPService:
                 )
             await db.flush()
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("HIP-initiated link DB persist skipped: %s", exc)
 
         return {"request_id": req_id, "status": "LINK_REQUESTED", "gateway_response": res}
 
-    async def generate_link_token(self, *, patient_id: str, abha_address: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    async def generate_link_token(self, *, patient_id: str, abha_address: str, user_id: str | None = None) -> dict[str, Any]:
         """Start HIP initiated link token issuance and retain callback correlation in Redis."""
         from app.core.redis_state import get_redis
         redis_client = await get_redis()
@@ -436,10 +440,10 @@ class HIPService:
     async def on_consent_notify(
         self,
         db: AsyncSession,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         raw_body: bytes,
-        signature_header: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        signature_header: str | None = None,
+    ) -> dict[str, Any]:
         req_id = payload.get("requestId") or str(uuid.uuid4())
         notification = payload.get("notification") or {}
         consent_id = notification.get("consentId") or str(uuid.uuid4())
@@ -472,7 +476,7 @@ class HIPService:
 
         perm = detail.get("permission") or {}
         date_range = perm.get("dateRange") or {}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         date_from = self._parse_iso(date_range.get("from"), now - timedelta(days=365))
         date_to = self._parse_iso(date_range.get("to"), now)
         erase_at = self._parse_iso(perm.get("dataEraseAt"), now + timedelta(days=30))
@@ -530,6 +534,7 @@ class HIPService:
                 )
             await db.flush()
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("HIP consent artefact DB persist fallback: %s", exc)
 
         on_notify_body = {
@@ -551,8 +556,8 @@ class HIPService:
     # ------------------------------------------------------------------
 
     async def on_data_request(
-        self, db: AsyncSession, payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, db: AsyncSession, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         req_id = payload.get("requestId") or str(uuid.uuid4())
         txn_id = payload.get("transactionId") or str(uuid.uuid4())
         hi_req = payload.get("hiRequest") or {}
@@ -604,8 +609,8 @@ class HIPService:
         ]
 
         hip_keypair = generate_ephemeral_keypair()
-        encrypted_entries: List[Dict[str, Any]] = []
-        status_entries: List[Dict[str, Any]] = []
+        encrypted_entries: list[dict[str, Any]] = []
+        status_entries: list[dict[str, Any]] = []
 
         for ctx in care_contexts:
             ref = ctx.get("careContextReference") or ctx.get("referenceNumber") or "ENC-DEFAULT"
@@ -700,9 +705,9 @@ class HIPService:
         self,
         db: AsyncSession,
         *,
-        abha_number: Optional[str],
-        abha_address: Optional[str],
-    ) -> Optional[Dict[str, Any]]:
+        abha_number: str | None,
+        abha_address: str | None,
+    ) -> dict[str, Any] | None:
         try:
             from app.models.encounter import Encounter
             from app.models.patient import Patient
@@ -716,7 +721,7 @@ class HIPService:
             if not conditions:
                 return None
 
-            query = select(Patient).where(Patient.is_deleted == False)  # noqa: E712
+            query = select(Patient).where(Patient.is_deleted == False)
             if len(conditions) == 2:
                 query = query.where(conditions[0] | conditions[1])
             else:
@@ -729,7 +734,7 @@ class HIPService:
             enc_res = await db.execute(
                 select(Encounter).where(
                     Encounter.patient_id == patient.id,
-                    Encounter.is_deleted == False,  # noqa: E712
+                    Encounter.is_deleted == False,
                 )
             )
             encounters = enc_res.scalars().all()
@@ -752,12 +757,13 @@ class HIPService:
                 "matchedBy": ["HEALTH_ID"],
             }
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("Local patient discovery query fallback: %s", exc)
             return None
 
     async def _load_consent_artefact(
         self, db: AsyncSession, consent_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         try:
             from app.models.abdm import ABDMConsentArtefact
 
@@ -778,15 +784,15 @@ class HIPService:
                     "date_to": row.date_to,
                 }
         except Exception:
-            pass
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         return None
 
     async def _build_fhir_bundles_for_context(
         self,
         db: AsyncSession,
         care_context_ref: str,
-        hi_types: List[str],
-    ) -> List[Dict[str, Any]]:
+        hi_types: list[str],
+    ) -> list[dict[str, Any]]:
         """Serialize real DB encounter/Rx/lab/discharge data into NRCeS FHIR R4 Document Bundles."""
         patient_res = build_patient_resource(
             patient_id=f"pat-{care_context_ref[:8]}",
@@ -812,9 +818,9 @@ class HIPService:
             encounter_type="OPD",
             start_time=utc_timestamp_iso(),
         )
-        conditions: List[Dict[str, Any]] = []
-        observations: List[Dict[str, Any]] = []
-        medications: List[Dict[str, Any]] = []
+        conditions: list[dict[str, Any]] = []
+        observations: list[dict[str, Any]] = []
+        medications: list[dict[str, Any]] = []
 
         # Attempt to enrich with live SQLAlchemy records if care_context_ref is an Encounter UUID
         try:
@@ -881,6 +887,7 @@ class HIPService:
                             )
                         )
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             logger.debug("FHIR context DB enrichment fallback: %s", exc)
 
         # Ensure non-empty clinical artifacts for valid NRCeS DocumentBundles
@@ -920,7 +927,7 @@ class HIPService:
                 )
             )
 
-        bundles: List[Dict[str, Any]] = []
+        bundles: list[dict[str, Any]] = []
         if "OPConsultation" in hi_types:
             bundles.append(
                 build_op_consult_bundle(
@@ -976,12 +983,13 @@ class HIPService:
         return bundles
 
     @staticmethod
-    def _parse_iso(val: Optional[str], fallback: datetime) -> datetime:
+    def _parse_iso(val: str | None, fallback: datetime) -> datetime:
         if not val:
             return fallback
         try:
-            return datetime.fromisoformat(val.replace("Z", "+00:00"))
+            return datetime.fromisoformat(val)
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             return fallback
 
 

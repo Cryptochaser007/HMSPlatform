@@ -3,12 +3,15 @@ Async SQLAlchemy engine, session factory, and declarative Base with
 common columns (id, created_at, updated_at, is_deleted).
 """
 
+import logging
 import os
-from datetime import datetime, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from uuid import UUID as UUIDValue
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Column, DateTime, text
+from fastapi import HTTPException, Request
+from sqlalchemy import Boolean, DateTime, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -66,15 +69,15 @@ class Base(DeclarativeBase):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=text("NOW()"),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=text("NOW()"),
-        onupdate=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
     is_deleted: Mapped[bool] = mapped_column(
@@ -85,16 +88,58 @@ class Base(DeclarativeBase):
     )
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+class TenantOwned:
+    """Ownership defaults come from the current PostgreSQL transaction."""
+    hospital_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("hospitals.id"), nullable=False,
+        server_default=text("hms_current_hospital_id()"),
+    )
+
+
+async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields an async database session."""
     async with async_session_factory() as session:
+        from app.core.tenant_context import current_hospital
+        context_token = current_hospital.set(None)
         try:
+            if settings.ENVIRONMENT.lower() == "production":
+                bypass = (await session.execute(text(
+                    "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user"
+                ))).scalar_one()
+                if bypass:
+                    raise HTTPException(status_code=503, detail="Database runtime role must enforce row-level security")
+            token = request.cookies.get("access_token", "")
+            authorization = request.headers.get("authorization", "")
+            if authorization.lower().startswith("bearer "):
+                token = authorization[7:].strip()
+            hospital_id = ""
+            is_superadmin = "false"
+            if token:
+                from app.core.security import decode_token
+                try:
+                    claims = decode_token(token)
+                    if claims.get("type") != "access":
+                        raise ValueError("Access token required")
+                    hospital_id = str(UUIDValue(claims["hospital_id"]))
+                    is_superadmin = "true" if claims.get("role") == "SUPER_ADMIN" else "false"
+                except Exception as exc:
+                    if request.url.path.endswith(("/auth/login", "/auth/refresh", "/tenants/register")):
+                        hospital_id = ""
+                    else:
+                        raise HTTPException(status_code=401, detail="Session expired") from exc
+            await session.execute(text(
+                "SELECT set_config('app.current_hospital_id', :hid, true), "
+                "set_config('app.hospital_id', :hid, true), "
+                "set_config('app.is_superadmin', :admin, true), "
+                "set_config('app.login_email', '', true)"
+            ), {"hid": hospital_id, "admin": is_superadmin})
             yield session
             await session.commit()
         except Exception:
             await session.rollback()
             raise
         finally:
+            current_hospital.reset(context_token)
             await session.close()
 
 
@@ -126,4 +171,5 @@ async def check_db_health() -> dict:
             "users_count": user_count,
         }
     except Exception as exc:
+        logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
         return {"status": "unhealthy", "database": str(exc), "database_host": db_host}

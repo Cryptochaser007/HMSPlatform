@@ -21,8 +21,8 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any, Self
 
 import httpx
 
@@ -38,9 +38,9 @@ class ABDMError(Exception):
     def __init__(
         self,
         message: str,
-        error_code: Optional[str] = None,
-        http_status: Optional[int] = None,
-        details: Optional[dict] = None,
+        error_code: str | None = None,
+        http_status: int | None = None,
+        details: dict | None = None,
     ) -> None:
         self.message = message
         self.error_code = error_code
@@ -67,7 +67,7 @@ ABDM_ERROR_MESSAGES: dict[str, str] = {
 
 def utc_timestamp_iso() -> str:
     """Return NHA-compliant UTC ISO-8601 timestamp with millisecond precision."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 # ---------------------------------------------------------------------------
@@ -90,18 +90,21 @@ class BaseABDMAdapter(abc.ABC):
         self,
         method: str,
         endpoint: str,
-        data: Optional[dict] = None,
-        headers: Optional[dict] = None,
+        data: dict | None = None,
+        headers: dict | None = None,
         *,
         target: str = "gateway",
         sign: bool = False,
         require_auth: bool = True,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> tuple[int, dict]:
         """Execute an ABDM call and return ``(http_status, response_dict)``."""
 
     async def close(self) -> None:
         """Release underlying HTTP resources."""
+
+    async def verify_gateway_jwt(self, token: str) -> dict:
+        raise ABDMError("Gateway verification requires a live adapter", "ABDM-JWT", 401)
 
 
 # ---------------------------------------------------------------------------
@@ -119,13 +122,13 @@ class MockABDMAdapter(BaseABDMAdapter):
         self,
         method: str,
         endpoint: str,
-        data: Optional[dict] = None,
-        headers: Optional[dict] = None,
+        data: dict | None = None,
+        headers: dict | None = None,
         *,
         target: str = "gateway",
         sign: bool = False,
         require_auth: bool = True,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> tuple[int, dict]:
         data = data or {}
         headers = headers or {}
@@ -182,7 +185,8 @@ class MockABDMAdapter(BaseABDMAdapter):
 
         # 0d. M1: ABHA QR Code (CRT_ABHA_114)
         if "qrCode" in endpoint or "qr" in endpoint.lower():
-            import base64 as _b64, json as _json
+            import base64 as _b64
+            import json as _json
             qr_data = _json.dumps({
                 "hidn": "91-4829-1029-4721",
                 "hid": f"arun.kumar@{self.settings.x_cm_id}",
@@ -393,7 +397,7 @@ class LiveABDMAdapter(BaseABDMAdapter):
                 "Accept": "application/json",
             },
         )
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._token_expires_at: float = 0.0
         self._token_lock = asyncio.Lock()
 
@@ -413,7 +417,7 @@ class LiveABDMAdapter(BaseABDMAdapter):
             response.raise_for_status()
             jwks = response.json()
             if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
-                raise ValueError("Gateway certificate response is not a JWKS")
+                raise TypeError("Gateway certificate response is not a JWKS")
             await put_json("abdm:gateway:jwks:v3", jwks, 43200)
             return jwks
         except Exception as exc:
@@ -507,7 +511,7 @@ class LiveABDMAdapter(BaseABDMAdapter):
                 ) from exc
 
     def _resolve_url(self, endpoint: str, target: str) -> str:
-        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+        if endpoint.startswith(("http://", "https://")):
             return endpoint
         base = self.settings.abha_url if target == "abha" else self.settings.gateway_url
         return f"{base.rstrip('/')}/{endpoint.lstrip('/')}"
@@ -516,13 +520,13 @@ class LiveABDMAdapter(BaseABDMAdapter):
         self,
         method: str,
         endpoint: str,
-        data: Optional[dict] = None,
-        headers: Optional[dict] = None,
+        data: dict | None = None,
+        headers: dict | None = None,
         *,
         target: str = "gateway",
         sign: bool = False,
         require_auth: bool = True,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> tuple[int, dict]:
         req_id = request_id or str(uuid.uuid4())
         ts = utc_timestamp_iso()
@@ -546,7 +550,7 @@ class LiveABDMAdapter(BaseABDMAdapter):
         if sign and body_str:
             req_headers["X-ABDM-Signature"] = self._sign_request(body_str)
 
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
@@ -575,6 +579,7 @@ class LiveABDMAdapter(BaseABDMAdapter):
                 try:
                     err_body = exc.response.json()
                 except Exception:
+                    logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
                     err_body = {"message": exc.response.text[:300]}
 
                 abdm_code = err_body.get("code") or err_body.get("error", {}).get("code")
@@ -613,7 +618,7 @@ class LiveABDMAdapter(BaseABDMAdapter):
 class ABDMClient:
     """Facade selecting MOCK vs LIVE adapter from ``ABDM_ENV`` and auditing all calls."""
 
-    def __init__(self, settings: Optional[ABDMSettings] = None) -> None:
+    def __init__(self, settings: ABDMSettings | None = None) -> None:
         self.settings = settings or get_abdm_settings()
         self._adapter: BaseABDMAdapter = (
             MockABDMAdapter(self.settings)
@@ -623,18 +628,24 @@ class ABDMClient:
 
     @property
     def mode(self) -> ABDMMode:
+        from app.core.tenant_context import current_hospital
+        hospital = current_hospital.get()
+        if hospital:
+            return ABDMMode(hospital["abdm_env"])
         return self.settings.abdm_env
 
     async def close(self) -> None:
         await self._adapter.close()
 
-    async def __aenter__(self) -> "ABDMClient":
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *exc: Any) -> None:
+    async def __aexit__(self, *exc: object) -> None:
         await self.close()
 
     async def get_access_token(self) -> str:
+        if self.mode == ABDMMode.MOCK:
+            return await MockABDMAdapter(self.settings).get_access_token()
         return await self._adapter.get_access_token()
 
     async def record_transaction(
@@ -644,11 +655,11 @@ class ABDMClient:
         direction: str,
         http_method: str,
         endpoint: str,
-        http_status: Optional[int],
+        http_status: int | None,
         payload: Any,
-        correlation_id: Optional[str] = None,
-        error_code: Optional[str] = None,
-        user_id: Optional[str] = None,
+        correlation_id: str | None = None,
+        error_code: str | None = None,
+        user_id: str | None = None,
     ) -> None:
         """Persist an immutable, PII-masked entry into ``abdm_transaction_logs``."""
         try:
@@ -670,9 +681,18 @@ class ABDMClient:
                 user_id=user_id,
             )
             async with async_session_factory() as session:
+                from sqlalchemy import text
+
+                from app.core.tenant_context import current_hospital
+                hospital = current_hospital.get()
+                if hospital:
+                    await session.execute(text(
+                        "SELECT set_config('app.current_hospital_id', :hid, true)"
+                    ), {"hid": hospital["hospital_id"]})
                 session.add(entry)
                 await session.commit()
         except Exception as exc:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             # Never break clinical/ABDM flow if transaction log table isn't migrated yet
             logger.debug("ABDM transaction log skipped: %s", exc)
 
@@ -680,22 +700,23 @@ class ABDMClient:
         self,
         method: str,
         endpoint: str,
-        data: Optional[dict] = None,
-        headers: Optional[dict] = None,
+        data: dict | None = None,
+        headers: dict | None = None,
         *,
         target: str = "gateway",
         sign: bool = False,
         require_auth: bool = True,
-        correlation_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        correlation_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict:
         """Execute an outbound ABDM API call with full WASA transaction auditing."""
         req_id = (data or {}).get("requestId") or str(uuid.uuid4())
-        http_status: Optional[int] = None
-        err_code: Optional[str] = None
+        http_status: int | None = None
+        err_code: str | None = None
 
         try:
-            http_status, response = await self._adapter.request(
+            adapter = MockABDMAdapter(self.settings) if self.mode == ABDMMode.MOCK else self._adapter
+            http_status, response = await adapter.request(
                 method=method,
                 endpoint=endpoint,
                 data=data,

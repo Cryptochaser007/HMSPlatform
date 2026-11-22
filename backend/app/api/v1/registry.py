@@ -1,7 +1,7 @@
 """HFR/HPR synchronization, referrals and payer/claim workflow endpoints."""
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -13,47 +13,53 @@ from app.abdm.hpr_service import hpr_service
 from app.core.database import get_db
 from app.core.encryption import encrypt_field
 from app.core.rbac import Permission
-from app.core.security import get_current_user, require_permissions
-from app.models.registry import HFRFacility, HPRPractitioner, Referral, InsurancePolicy, InsuranceClaim
+from app.core.security import require_permissions
+from app.models.registry import (
+    HFRFacility,
+    HPRPractitioner,
+    InsuranceClaim,
+    InsurancePolicy,
+    Referral,
+)
 
 router = APIRouter(tags=["Registry, Referrals & Insurance"])
 
 
 class ReferralCreate(BaseModel):
     patient_id: str
-    encounter_id: Optional[str] = None
+    encounter_id: str | None = None
     referral_type: str = "INTERNAL"
-    source_department: Optional[str] = None
-    target_department: Optional[str] = None
-    target_facility_id: Optional[str] = None
-    practitioner_id: Optional[str] = None
+    source_department: str | None = None
+    target_department: str | None = None
+    target_facility_id: str | None = None
+    practitioner_id: str | None = None
     reason: str = Field(..., min_length=2, max_length=4000)
-    clinical_summary: Dict[str, Any] = Field(default_factory=dict)
+    clinical_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class PolicyCreate(BaseModel):
     patient_id: str
-    payer_code: Optional[str] = None
+    payer_code: str | None = None
     payer_name: str
-    policy_number: Optional[str] = None
-    member_id: Optional[str] = None
-    coverage: Dict[str, Any] = Field(default_factory=dict)
-    valid_from: Optional[date] = None
-    valid_to: Optional[date] = None
+    policy_number: str | None = None
+    member_id: str | None = None
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    valid_from: date | None = None
+    valid_to: date | None = None
 
 
 class ClaimCreate(BaseModel):
     policy_id: str
     patient_id: str
-    encounter_id: Optional[str] = None
-    claim_number: Optional[str] = None
-    preauth_reference: Optional[str] = None
+    encounter_id: str | None = None
+    claim_number: str | None = None
+    preauth_reference: str | None = None
     requested_amount: Decimal = Field(ge=0)
     currency: str = "INR"
-    nhcx_payload: Dict[str, Any] = Field(default_factory=dict)
+    nhcx_payload: dict[str, Any] = Field(default_factory=dict)
 
 
-def _base(row) -> Dict[str, Any]:
+def _base(row) -> dict[str, Any]:
     return {"id": str(row.id), "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
 
 
@@ -68,7 +74,7 @@ async def sync_hfr_facility(facility_id: str = Query(..., min_length=2, max_leng
     row.facility_type = profile.facility_type
     row.address = {"address": profile.address, "ownership": profile.ownership, "specialities": profile.specialities, "services": profile.services}
     row.registry_status = "ACTIVE" if profile.is_active else "INACTIVE"
-    row.synced_at = datetime.now(timezone.utc)
+    row.synced_at = datetime.now(UTC)
     row.source_payload = profile.model_dump(mode="json")
     await db.flush()
     return {**_base(row), "hfr_id": row.hfr_id, "facility_name": row.facility_name, "registry_status": row.registry_status, "synced_at": row.synced_at.isoformat()}
@@ -85,15 +91,15 @@ async def sync_hpr_practitioner(registration_number: str = Query(..., min_length
     row.registration_number = profile.registration_number
     row.specialties = [profile.speciality]
     row.registry_status = "VERIFIED" if profile.is_verified else "UNVERIFIED"
-    row.synced_at = datetime.now(timezone.utc)
+    row.synced_at = datetime.now(UTC)
     row.source_payload = profile.model_dump(mode="json")
     await db.flush()
     return {**_base(row), "hpr_id": row.hpr_id, "practitioner_name": row.practitioner_name, "registry_status": row.registry_status}
 
 
 @router.get("/referrals", dependencies=[Depends(require_permissions(Permission.PATIENT_READ.value))])
-async def list_referrals(patient_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    query = select(Referral).where(Referral.is_deleted == False).order_by(desc(Referral.created_at)).limit(100)  # noqa: E712
+async def list_referrals(patient_id: str | None = None, db: AsyncSession = Depends(get_db)):
+    query = select(Referral).where(Referral.is_deleted == False).order_by(desc(Referral.created_at)).limit(100)
     if patient_id:
         query = query.where(Referral.patient_id == patient_id)
     rows = (await db.execute(query)).scalars().all()
@@ -110,18 +116,18 @@ async def create_referral(data: ReferralCreate, db: AsyncSession = Depends(get_d
 
 @router.patch("/referrals/{referral_id}/status", dependencies=[Depends(require_permissions(Permission.PATIENT_UPDATE.value))])
 async def update_referral_status(referral_id: str, new_status: str = Query(..., pattern="^(DRAFT|SENT|ACCEPTED|DECLINED|COMPLETED|CANCELLED)$"), db: AsyncSession = Depends(get_db)):
-    row = (await db.execute(select(Referral).where(Referral.id == referral_id, Referral.is_deleted == False))).scalar_one_or_none()  # noqa: E712
+    row = (await db.execute(select(Referral).where(Referral.id == referral_id, Referral.is_deleted == False))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Referral not found")
     row.status = new_status
-    row.responded_at = datetime.now(timezone.utc) if new_status in {"ACCEPTED", "DECLINED", "COMPLETED"} else row.responded_at
+    row.responded_at = datetime.now(UTC) if new_status in {"ACCEPTED", "DECLINED", "COMPLETED"} else row.responded_at
     await db.flush()
     return {"id": str(row.id), "status": row.status}
 
 
 @router.get("/insurance/policies", dependencies=[Depends(require_permissions(Permission.BILLING_READ.value))])
-async def list_policies(patient_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    q = select(InsurancePolicy).where(InsurancePolicy.is_deleted == False).order_by(desc(InsurancePolicy.created_at)).limit(100)  # noqa: E712
+async def list_policies(patient_id: str | None = None, db: AsyncSession = Depends(get_db)):
+    q = select(InsurancePolicy).where(InsurancePolicy.is_deleted == False).order_by(desc(InsurancePolicy.created_at)).limit(100)
     if patient_id:
         q = q.where(InsurancePolicy.patient_id == patient_id)
     rows = (await db.execute(q)).scalars().all()
@@ -138,8 +144,8 @@ async def create_policy(data: PolicyCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/insurance/claims", dependencies=[Depends(require_permissions(Permission.BILLING_READ.value))])
-async def list_claims(patient_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
-    q = select(InsuranceClaim).where(InsuranceClaim.is_deleted == False).order_by(desc(InsuranceClaim.created_at)).limit(100)  # noqa: E712
+async def list_claims(patient_id: str | None = None, db: AsyncSession = Depends(get_db)):
+    q = select(InsuranceClaim).where(InsuranceClaim.is_deleted == False).order_by(desc(InsuranceClaim.created_at)).limit(100)
     if patient_id:
         q = q.where(InsuranceClaim.patient_id == patient_id)
     rows = (await db.execute(q)).scalars().all()
@@ -156,11 +162,11 @@ async def create_claim(data: ClaimCreate, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/insurance/claims/{claim_id}/status", dependencies=[Depends(require_permissions(Permission.BILLING_UPDATE.value))])
 async def update_claim_status(claim_id: str, new_status: str = Query(..., pattern="^(DRAFT|PREAUTH_PENDING|PREAUTH_APPROVED|SUBMITTED|ADJUDICATED|REJECTED|PAID|CANCELLED)$"), db: AsyncSession = Depends(get_db)):
-    row = (await db.execute(select(InsuranceClaim).where(InsuranceClaim.id == claim_id, InsuranceClaim.is_deleted == False))).scalar_one_or_none()  # noqa: E712
+    row = (await db.execute(select(InsuranceClaim).where(InsuranceClaim.id == claim_id, InsuranceClaim.is_deleted == False))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Insurance claim not found")
     row.lifecycle_status = new_status
     if new_status in {"ADJUDICATED", "REJECTED", "PAID"}:
-        row.adjudicated_at = datetime.now(timezone.utc)
+        row.adjudicated_at = datetime.now(UTC)
     await db.flush()
     return {"id": str(row.id), "lifecycle_status": row.lifecycle_status}

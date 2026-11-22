@@ -5,9 +5,10 @@ tamper detection.
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from enum import Enum as PyEnum
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
 from fastapi import Depends, Request
@@ -49,7 +50,7 @@ def _json_default(obj: Any) -> Any:
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
-def _safe_json(value: Any) -> Optional[str]:
+def _safe_json(value: Any) -> str | None:
     if value is None:
         return None
     return json.dumps(value, default=_json_default, sort_keys=True)
@@ -75,21 +76,21 @@ class AuditLogger:
         self,
         db: AsyncSession,
         *,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         action: AuditAction,
         entity_type: str,
-        entity_id: Optional[str] = None,
-        old_value: Optional[Dict[str, Any]] = None,
-        new_value: Optional[Dict[str, Any]] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        session_id: Optional[str] = None,
+        entity_id: str | None = None,
+        old_value: dict[str, Any] | None = None,
+        new_value: dict[str, Any] | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+        session_id: str | None = None,
     ) -> str:
         """Persist a new audit log entry. Returns the new entry ID."""
         from app.models.audit import AuditLog
 
         entry_id = str(uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Build the canonical string for hashing
         record_data = _safe_json(
@@ -136,8 +137,8 @@ class AuditLogger:
         field_name: str,
         old_value: Any,
         new_value: Any,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> str:
         """Convenience wrapper for clinical-record modifications.
 
@@ -191,9 +192,9 @@ def audit_log(
 
         async def _write(
             entity_id: str,
-            old_value: Optional[Dict[str, Any]] = None,
-            new_value: Optional[Dict[str, Any]] = None,
-            user_id: Optional[str] = None,
+            old_value: dict[str, Any] | None = None,
+            new_value: dict[str, Any] | None = None,
+            user_id: str | None = None,
         ) -> str:
             return await audit_logger.log(
                 db,

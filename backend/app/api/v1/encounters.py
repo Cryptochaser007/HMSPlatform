@@ -1,9 +1,9 @@
 """OPD and IPD Encounter management and clinic queue endpoints."""
 
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/encounters", tags=["OPD & IPD Encounters"])
 )
 async def create_encounter(
     data: EncounterCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EncounterResponse:
     """Create a new encounter (OPD walk-in, IPD intake, or booked appointment)."""
@@ -56,11 +56,11 @@ async def create_encounter(
     dependencies=[Depends(require_permissions(Permission.ENCOUNTER_READ.value))],
 )
 async def list_encounters(
-    department: Optional[str] = Query(None),
-    doctor_id: Optional[str] = Query(None),
-    encounter_type: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query(None),
-    target_date: Optional[date] = Query(None),
+    department: str | None = Query(None),
+    doctor_id: str | None = Query(None),
+    encounter_type: str | None = Query(None),
+    status_filter: str | None = Query(None),
+    target_date: date | None = Query(None),
     pagination: PaginationParams = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ) -> EncounterListResponse:
@@ -105,7 +105,7 @@ async def get_encounter(
 async def update_encounter(
     encounter_id: str,
     data: EncounterUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EncounterResponse:
     """Update encounter notes, room assignment, or follow-up date."""
@@ -134,7 +134,7 @@ async def check_in_patient(
 )
 async def start_consultation(
     encounter_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EncounterResponse:
     """Doctor marks encounter as IN_PROGRESS when starting patient examination."""
@@ -160,13 +160,13 @@ async def complete_consultation(
 
 @router.get(
     "/queue/{department}",
-    response_model=List[QueueResponse],
+    response_model=list[QueueResponse],
     dependencies=[Depends(require_permissions(Permission.ENCOUNTER_READ.value))],
 )
 async def get_opd_queue(
     department: str,
     db: AsyncSession = Depends(get_db),
-) -> List[QueueResponse]:
+) -> list[QueueResponse]:
     """Get active live queue tokens and estimated wait times for a department."""
     queue = await encounter_service.get_queue(db, department)
     return [QueueResponse(**item) for item in queue]

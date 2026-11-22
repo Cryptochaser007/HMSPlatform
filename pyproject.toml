@@ -11,13 +11,17 @@ ignore_missing_imports = true
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency and request-field declarations are immutable metadata.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Body", "fastapi.Path", "pydantic.Field"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-v --tb=short"
 testpaths = ["backend/tests"]
 pythonpath = ["backend"]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "session"
+asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::pytest.PytestDeprecationWarning",

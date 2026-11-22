@@ -1,12 +1,14 @@
 """Radiology models: RadiologyOrder, RadiologyReport."""
 
 import enum
+from typing import Any
 
-from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from app.core.database import Base, TenantOwned
 
 
 class Modality(str, enum.Enum):
@@ -35,30 +37,30 @@ class RadiologyPriority(str, enum.Enum):
     STAT = "STAT"
 
 
-class RadiologyOrder(Base):
+class RadiologyOrder(TenantOwned, Base):
     __tablename__ = "radiology_orders"
 
-    encounter_id = Column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=False, index=True)
-    patient_id = Column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
-    ordered_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
-    modality = Column(SAEnum(Modality, name="modality_enum"), nullable=False)
-    body_part = Column(String(200), nullable=False)
-    study_description = Column(Text, nullable=True)
-    status = Column(
+    encounter_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("encounters.id"), nullable=False, index=True)
+    patient_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=False, index=True)
+    ordered_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    modality: Mapped[Any] = mapped_column(SAEnum(Modality, name="modality_enum"), nullable=False)
+    body_part: Mapped[Any] = mapped_column(String(200), nullable=False)
+    study_description: Mapped[Any] = mapped_column(Text, nullable=True)
+    status: Mapped[Any] = mapped_column(
         SAEnum(RadiologyOrderStatus, name="radiology_order_status_enum"),
         nullable=False,
         default=RadiologyOrderStatus.ORDERED,
     )
-    priority = Column(
+    priority: Mapped[Any] = mapped_column(
         SAEnum(RadiologyPriority, name="radiology_priority_enum"),
         nullable=False,
         default=RadiologyPriority.ROUTINE,
     )
-    clinical_indication = Column(Text, nullable=True)
-    scheduled_at = Column(DateTime(timezone=True), nullable=True)
-    orthanc_study_id = Column(String(255), nullable=True)
-    dicom_study_uid = Column(String(255), nullable=True)
-    accession_number = Column(String(50), unique=True, nullable=True)
+    clinical_indication: Mapped[Any] = mapped_column(Text, nullable=True)
+    scheduled_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=True)
+    orthanc_study_id: Mapped[Any] = mapped_column(String(255), nullable=True)
+    dicom_study_uid: Mapped[Any] = mapped_column(String(255), nullable=True)
+    accession_number: Mapped[Any] = mapped_column(String(50), unique=True, nullable=True)
 
     # Relationships
     encounter = relationship("Encounter", back_populates="radiology_orders")
@@ -70,19 +72,19 @@ class RadiologyOrder(Base):
         return f"<RadiologyOrder {self.modality} {self.body_part}>"
 
 
-class RadiologyReport(Base):
+class RadiologyReport(TenantOwned, Base):
     __tablename__ = "radiology_reports"
 
-    order_id = Column(UUID(as_uuid=False), ForeignKey("radiology_orders.id"), nullable=False, unique=True)
-    radiologist_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
-    findings = Column(Text, nullable=False)
-    impression = Column(Text, nullable=False)
-    recommendation = Column(Text, nullable=True)
-    is_critical = Column(Boolean, default=False, server_default="FALSE")
-    reported_at = Column(DateTime(timezone=True), nullable=False)
-    verified_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
-    verified_at = Column(DateTime(timezone=True), nullable=True)
-    template_used = Column(String(100), nullable=True)
+    order_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("radiology_orders.id"), nullable=False, unique=True)
+    radiologist_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    findings: Mapped[Any] = mapped_column(Text, nullable=False)
+    impression: Mapped[Any] = mapped_column(Text, nullable=False)
+    recommendation: Mapped[Any] = mapped_column(Text, nullable=True)
+    is_critical: Mapped[Any] = mapped_column(Boolean, default=False, server_default="FALSE")
+    reported_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=False)
+    verified_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    verified_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=True)
+    template_used: Mapped[Any] = mapped_column(String(100), nullable=True)
 
     # Relationships
     order = relationship("RadiologyOrder", back_populates="report")

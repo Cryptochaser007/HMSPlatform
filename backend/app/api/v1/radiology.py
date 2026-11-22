@@ -1,8 +1,8 @@
 """Radiology Information System and PACS / OHIF integration endpoints."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/radiology", tags=["Radiology (PACS)"])
 )
 async def create_radiology_order(
     data: RadiologyOrderCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RadiologyOrderResponse:
     """Order radiology examination (X-Ray, CT, MRI, Ultrasound) with Accession Number."""
@@ -55,11 +55,11 @@ async def create_radiology_order(
     dependencies=[Depends(require_permissions(Permission.RADIOLOGY_VIEW.value))],
 )
 async def list_radiology_orders(
-    modality: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query(None),
+    modality: str | None = Query(None),
+    status_filter: str | None = Query(None),
     pagination: PaginationParams = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """List radiology imaging worklist."""
     res = await radiology_service.list_orders(
         db,
@@ -99,7 +99,7 @@ async def update_radiology_status(
 )
 async def create_radiology_report(
     data: RadiologyReportCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RadiologyReportResponse:
     """Radiologist drafts diagnostic study interpretation."""
@@ -116,7 +116,7 @@ async def create_radiology_report(
 )
 async def verify_radiology_report(
     report_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RadiologyReportResponse:
     """Consultant Radiologist signs and verifies diagnostic imaging report."""
@@ -132,7 +132,7 @@ async def verify_radiology_report(
 )
 async def get_pacs_viewer_link(
     study_id: str,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Generate OHIF DICOM Web viewer URL for deep-linking images in patient chart."""
     return radiology_service.get_viewer_url(study_id)
 

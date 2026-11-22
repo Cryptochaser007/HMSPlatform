@@ -1,9 +1,7 @@
 """Fidelius interoperability vectors for raw X25519 and X.509 SPKI inputs."""
 import base64
-import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
 
+import pytest
 from app.abdm.fidelius import (
     FideliusKeyPair,
     _encode_spki,
@@ -12,6 +10,8 @@ from app.abdm.fidelius import (
     encrypt_fhir_bundle,
     generate_ephemeral_keypair,
 )
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 
 def test_curve25519_uncompressed_and_spki_der_load_to_same_public_point():

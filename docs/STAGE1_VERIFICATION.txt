@@ -1,0 +1,169 @@
+Stage 1 Verification Summary
+Verified on 22 November 2026
+
+Outcome
+Hospital signup, transaction-scoped RLS, tenant-owned models, trial MOCK routing,
+AES-256-GCM compatibility readers, and strict Redis authentication state are implemented.
+The frontend has a Register Hospital form and uses HttpOnly cookies with CSRF headers.
+
+Checks
+PASS  pytest backend/tests with isolated PostgreSQL 16 and Redis 7: 45 passed.
+PASS  ruff check backend
+PASS  mypy backend: 93 source files
+PASS  npm run build --prefix frontend
+PASS  git diff --check
+PASS  Original scripts/supabase_schema.sql, migrations/002_abdm_v3_exit_compliance.sql,
+      and frontend/src/App.tsx have no changes.
+SKIP  Pyright is not installed.
+
+Integration coverage
+- Successful hospital signup and administrator sign-in
+- MOCK/TRIAL defaults, OPD department, two starter NABH indicators
+- Duplicate signup rollback with no orphan hospital
+- Cross-tenant patient reads/updates denied using a NOSUPERUSER NOBYPASSRLS role
+- Cross-tenant inserts rejected by RLS
+- Cross-tenant parent references rejected by composite foreign keys
+- Missing tenant context sees no tenant records
+- Transaction context resets after commit
+- Audit logs reject updates
+- Five failed logins lock the account, including correct-password attempts afterward
+- Idle Redis session expiry rejects access and refresh
+- Redis outage rejects revocation checks and authenticated HTTP requests
+- Tenant-scoped cached longitudinal records
+- Hosted SANDBOX configuration still routes trial hospital operations through MOCK
+- Production API docs disabled and localhost CSP limited to development
+- TLS Redis connection selection
+- AES-GCM nonce randomness, authentication-tag tamper rejection, legacy Fernet,
+  and both previous envelope formats
+- New migration applied twice after both previous 003 migrations
+- Existing users preserved and encrypted field contents remain byte-for-byte identical
+
+Migration and runtime prerequisites
+1. Apply backend/migrations/003_stage1_multitenancy_and_rls.sql using the migration
+   owner before deploying the Stage 1 application.
+   The migration supports the original schema plus 002, and databases where the
+   previous two 003 migrations have already run. Existing migrations are preserved.
+2. For a new database, run the original demo seed before Stage 1. Stage 1 changes
+   quality indicator uniqueness from a global code to (hospital_id, code), so the
+   original seed's ON CONFLICT(code) is intended to run before that change.
+3. Production DATABASE_URL must use a restricted runtime login with table DML,
+   schema USAGE, and required sequence privileges. It must not be superuser,
+   BYPASSRLS, or a member of hms_system. The application refuses production
+   requests when the connected role bypasses RLS.
+4. Reachable shared REDIS_URL is required for authentication. rediss:// uses TLS.
+   Memory fallbacks are not used for token revocation or authentication sessions.
+5. Preserve existing ENCRYPTION_KEY, ENCRYPTION_MASTER_KEY, versioned historical
+   master keys, and SECRET_KEY. No live secret values were changed.
+6. Existing sessions need a fresh sign-in to receive hospital-scoped JWT claims.
+7. The published admin@hms.local demo account becomes HOSPITAL_ADMIN inside
+   Demo General Hospital. Platform operators require separate provisioning.
+   hms_system is a NOLOGIN maintenance role with explicit RLS policies.
+
+Scope and limitations
+All verification used dedicated local test services. No hosted SQL, hosted secrets,
+or production deployment settings were changed. Live ABDM callbacks and hosted
+infrastructure still require environment-specific validation. Stage 2 is pending.
+This report accompanies the Stage 1 commit. Hosted configuration remains pending.
+
+Review notes
+Repository-wide lint/type cleanup includes Python 3.12 annotations, import cleanup,
+SQLAlchemy 2 Mapped descriptors, corrected optional laboratory parameters, and
+sanitized fallback logging. Ruff's immutable-call list now recognizes FastAPI
+dependency declarations. These account for edits beyond the core Stage 1 files.
+Test containers hms-stage1-verification-db and hms-stage1-verification-redis remain
+available locally for repeat verification.
+
+Modified and created files
+Modified  .env.example
+Modified  backend/.env.example
+Modified  backend/alembic/env.py
+Modified  backend/app/abdm/__init__.py
+Modified  backend/app/abdm/abha_service.py
+Modified  backend/app/abdm/callbacks.py
+Modified  backend/app/abdm/client.py
+Modified  backend/app/abdm/config.py
+Modified  backend/app/abdm/fidelius.py
+Modified  backend/app/abdm/hfr_service.py
+Modified  backend/app/abdm/hip_service.py
+Modified  backend/app/abdm/hiu_service.py
+Modified  backend/app/abdm/hpr_service.py
+Modified  backend/app/api/v1/abdm.py
+Modified  backend/app/api/v1/auth.py
+Modified  backend/app/api/v1/billing.py
+Modified  backend/app/api/v1/clinical.py
+Modified  backend/app/api/v1/encounters.py
+Modified  backend/app/api/v1/laboratory.py
+Modified  backend/app/api/v1/patients.py
+Modified  backend/app/api/v1/pharmacy.py
+Modified  backend/app/api/v1/quality.py
+Modified  backend/app/api/v1/radiology.py
+Modified  backend/app/api/v1/registry.py
+Modified  backend/app/api/v1/router.py
+Modified  backend/app/api/v1/ward.py
+Modified  backend/app/core/audit.py
+Modified  backend/app/core/cloud_adapters.py
+Modified  backend/app/core/config.py
+Modified  backend/app/core/database.py
+Modified  backend/app/core/dependencies.py
+Modified  backend/app/core/encryption.py
+Modified  backend/app/core/rbac.py
+Modified  backend/app/core/redis_state.py
+Modified  backend/app/core/security.py
+Modified  backend/app/core/wasa_security.py
+Modified  backend/app/main.py
+Modified  backend/app/models/__init__.py
+Modified  backend/app/models/abdm.py
+Modified  backend/app/models/audit.py
+Modified  backend/app/models/billing.py
+Modified  backend/app/models/clinical.py
+Modified  backend/app/models/consent.py
+Modified  backend/app/models/encounter.py
+Modified  backend/app/models/laboratory.py
+Modified  backend/app/models/patient.py
+Modified  backend/app/models/pharmacy.py
+Modified  backend/app/models/quality.py
+Modified  backend/app/models/radiology.py
+Modified  backend/app/models/registry.py
+Modified  backend/app/models/user.py
+Modified  backend/app/models/ward.py
+Modified  backend/app/schemas/__init__.py
+Modified  backend/app/schemas/billing.py
+Modified  backend/app/schemas/clinical.py
+Modified  backend/app/schemas/consent.py
+Modified  backend/app/schemas/encounter.py
+Modified  backend/app/schemas/laboratory.py
+Modified  backend/app/schemas/patient.py
+Modified  backend/app/schemas/pharmacy.py
+Modified  backend/app/schemas/quality.py
+Modified  backend/app/schemas/radiology.py
+Modified  backend/app/schemas/user.py
+Modified  backend/app/schemas/ward.py
+Modified  backend/app/services/__init__.py
+Modified  backend/app/services/auth_service.py
+Modified  backend/app/services/billing_service.py
+Modified  backend/app/services/clinical_service.py
+Modified  backend/app/services/encounter_service.py
+Modified  backend/app/services/lab_service.py
+Modified  backend/app/services/patient_service.py
+Modified  backend/app/services/pharmacy_service.py
+Modified  backend/app/services/quality_service.py
+Modified  backend/app/services/radiology_service.py
+Modified  backend/app/services/ward_service.py
+Modified  backend/app/utils/__init__.py
+Modified  backend/app/utils/fhir.py
+Modified  backend/app/utils/helpers.py
+Modified  backend/tests/conftest.py
+Modified  backend/tests/test_abdm_v3_and_wasa.py
+Modified  backend/tests/test_encryption.py
+Modified  backend/tests/test_fidelius_vectors.py
+Modified  backend/tests/test_m1_mandatory.py
+Modified  frontend/src/pages/Login.tsx
+Modified  frontend/src/services/api.ts
+Modified  pyproject.toml
+Created  backend/app/api/v1/tenants.py
+Created  backend/app/core/tenant_context.py
+Created  backend/app/models/tenant.py
+Created  backend/migrations/003_stage1_multitenancy_and_rls.sql
+Created  backend/tests/test_stage1_security.py
+Created  docs/STAGE1_VERIFICATION.txt
+

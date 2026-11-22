@@ -1,7 +1,6 @@
 """Radiology service: orders, PACS integration, and diagnostic reports."""
 
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -42,7 +41,7 @@ class RadiologyService:
         result = await db.execute(
             select(RadiologyOrder)
             .options(selectinload(RadiologyOrder.report))
-            .where(RadiologyOrder.id == order_id, RadiologyOrder.is_deleted == False)  # noqa: E712
+            .where(RadiologyOrder.id == order_id, RadiologyOrder.is_deleted == False)
         )
         order = result.scalar_one_or_none()
         if order is None:
@@ -54,10 +53,10 @@ class RadiologyService:
         db: AsyncSession,
         page: int = 1,
         page_size: int = 20,
-        modality: Optional[str] = None,
-        status_filter: Optional[str] = None,
+        modality: str | None = None,
+        status_filter: str | None = None,
     ) -> dict:
-        query = select(RadiologyOrder).where(RadiologyOrder.is_deleted == False)  # noqa: E712
+        query = select(RadiologyOrder).where(RadiologyOrder.is_deleted == False)
         if modality:
             query = query.where(RadiologyOrder.modality == modality)
         if status_filter:
@@ -77,7 +76,7 @@ class RadiologyService:
         update_data = data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(order, field, value)
-        order.updated_at = datetime.now(timezone.utc)
+        order.updated_at = datetime.now(UTC)
         await db.flush()
         await db.refresh(order)
         return order
@@ -98,7 +97,7 @@ class RadiologyService:
             impression=data.impression,
             recommendation=data.recommendation,
             is_critical=data.is_critical,
-            reported_at=datetime.now(timezone.utc),
+            reported_at=datetime.now(UTC),
             template_used=data.template_used,
         )
         db.add(report)
@@ -115,7 +114,7 @@ class RadiologyService:
         if report is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
         report.verified_by = verifier_id
-        report.verified_at = datetime.now(timezone.utc)
+        report.verified_at = datetime.now(UTC)
 
         # Update order status to VERIFIED
         order = await self.get_order(db, report.order_id)

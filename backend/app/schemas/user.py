@@ -1,7 +1,6 @@
 """Pydantic v2 schemas for User and Authentication."""
 
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,9 +9,9 @@ class UserBase(BaseModel):
     email: str = Field(..., min_length=3, max_length=255, description="Staff email address")
     full_name: str = Field(..., min_length=2, max_length=255)
     role: str
-    department: Optional[str] = None
-    registration_number: Optional[str] = None
-    phone: Optional[str] = None
+    department: str | None = None
+    registration_number: str | None = None
+    phone: str | None = None
 
 
 class UserCreate(UserBase):
@@ -20,11 +19,11 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str] = Field(None, min_length=2, max_length=255)
-    department: Optional[str] = None
-    registration_number: Optional[str] = None
-    phone: Optional[str] = None
-    is_active: Optional[bool] = None
+    full_name: str | None = Field(None, min_length=2, max_length=255)
+    department: str | None = None
+    registration_number: str | None = None
+    phone: str | None = None
+    is_active: bool | None = None
 
 
 class UserResponse(UserBase):
@@ -32,7 +31,7 @@ class UserResponse(UserBase):
     id: str
     is_active: bool
     is_verified: bool
-    last_login: Optional[datetime] = None
+    last_login: datetime | None = None
     created_at: datetime
 
 
@@ -50,7 +49,7 @@ class Token(BaseModel):
 class TokenPayload(BaseModel):
     sub: str
     role: str
-    permissions: List[str] = []
+    permissions: list[str] = []
     exp: datetime
     iat: datetime
     jti: str

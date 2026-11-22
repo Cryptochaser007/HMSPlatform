@@ -1,10 +1,9 @@
 """Encounter service: OPD/IPD workflow, queue, appointments."""
 
-from datetime import date, datetime, time, timedelta, timezone
-from typing import List, Optional
+from datetime import UTC, date, datetime, time, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.encounter import Encounter, EncounterStatus, EncounterType
@@ -32,7 +31,7 @@ class EncounterService:
             status=initial_status,
             token_number=token_number,
             appointment_time=data.appointment_time,
-            check_in_time=datetime.now(timezone.utc) if initial_status == EncounterStatus.CHECKED_IN else None,
+            check_in_time=datetime.now(UTC) if initial_status == EncounterStatus.CHECKED_IN else None,
             department=data.department,
             chief_complaint=data.chief_complaint,
             priority=data.priority,
@@ -44,7 +43,7 @@ class EncounterService:
 
     async def get_encounter(self, db: AsyncSession, encounter_id: str) -> Encounter:
         result = await db.execute(
-            select(Encounter).where(Encounter.id == encounter_id, Encounter.is_deleted == False)  # noqa: E712
+            select(Encounter).where(Encounter.id == encounter_id, Encounter.is_deleted == False)
         )
         encounter = result.scalar_one_or_none()
         if encounter is None:
@@ -56,13 +55,13 @@ class EncounterService:
         db: AsyncSession,
         page: int = 1,
         page_size: int = 20,
-        department: Optional[str] = None,
-        doctor_id: Optional[str] = None,
-        encounter_type: Optional[str] = None,
-        status_filter: Optional[str] = None,
-        date_filter: Optional[date] = None,
+        department: str | None = None,
+        doctor_id: str | None = None,
+        encounter_type: str | None = None,
+        status_filter: str | None = None,
+        date_filter: date | None = None,
     ) -> dict:
-        query = select(Encounter).where(Encounter.is_deleted == False)  # noqa: E712
+        query = select(Encounter).where(Encounter.is_deleted == False)
 
         if department:
             query = query.where(Encounter.department == department)
@@ -92,7 +91,7 @@ class EncounterService:
                 detail=f"Cannot check in from status {encounter.status}",
             )
         encounter.status = EncounterStatus.CHECKED_IN
-        encounter.check_in_time = datetime.now(timezone.utc)
+        encounter.check_in_time = datetime.now(UTC)
         if encounter.token_number is None:
             encounter.token_number = await self._get_next_token(db, encounter.department)
         await db.flush()
@@ -106,7 +105,7 @@ class EncounterService:
                 detail="Patient must be checked in first",
             )
         encounter.status = EncounterStatus.IN_PROGRESS
-        encounter.start_time = datetime.now(timezone.utc)
+        encounter.start_time = datetime.now(UTC)
         await db.flush()
         return encounter
 
@@ -118,7 +117,7 @@ class EncounterService:
                 detail="Encounter must be in progress to complete",
             )
         encounter.status = EncounterStatus.COMPLETED
-        encounter.end_time = datetime.now(timezone.utc)
+        encounter.end_time = datetime.now(UTC)
         await db.flush()
         return encounter
 
@@ -129,7 +128,7 @@ class EncounterService:
         update_data = data.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(encounter, field, value)
-        encounter.updated_at = datetime.now(timezone.utc)
+        encounter.updated_at = datetime.now(UTC)
         await db.flush()
         await db.refresh(encounter)
         return encounter
@@ -144,7 +143,7 @@ class EncounterService:
                 Encounter.encounter_type == EncounterType.OPD,
                 Encounter.status.in_([EncounterStatus.CHECKED_IN, EncounterStatus.IN_PROGRESS]),
                 func.date(Encounter.created_at) == today,
-                Encounter.is_deleted == False,  # noqa: E712
+                Encounter.is_deleted == False,
             )
             .order_by(
                 Encounter.priority.desc(),
@@ -178,7 +177,7 @@ class EncounterService:
                 Encounter.doctor_id == doctor_id,
                 func.date(Encounter.appointment_time) == target_date,
                 Encounter.status != EncounterStatus.CANCELLED,
-                Encounter.is_deleted == False,  # noqa: E712
+                Encounter.is_deleted == False,
             )
         )
         booked_times = {row[0].strftime("%H:%M") for row in result.all() if row[0]}

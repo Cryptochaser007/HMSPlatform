@@ -1,7 +1,6 @@
 """Pydantic v2 schemas for Consent management (DPDP Act)."""
 
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -9,9 +8,9 @@ from pydantic import BaseModel, ConfigDict
 class ConsentCreate(BaseModel):
     consent_type: str
     purpose: str
-    data_categories: Optional[List[str]] = None
+    data_categories: list[str] | None = None
     granted_to: str = "Self Hospital"
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
 
 
 class ConsentRevoke(BaseModel):
@@ -24,18 +23,18 @@ class ConsentResponse(BaseModel):
     patient_id: str
     consent_type: str
     purpose: str
-    data_categories: Optional[List[str]] = None
+    data_categories: list[str] | None = None
     granted_to: str
     status: str
     granted_at: datetime
-    expires_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = None
-    revoked_reason: Optional[str] = None
-    consent_artifact_id: Optional[str] = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+    revoked_reason: str | None = None
+    consent_artifact_id: str | None = None
 
 
 class ConsentListResponse(BaseModel):
-    items: List[ConsentResponse]
+    items: list[ConsentResponse]
     total: int
     page: int
     page_size: int

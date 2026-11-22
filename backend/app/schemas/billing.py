@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,15 +13,15 @@ class BillItemCreate(BaseModel):
     unit_price: Decimal = Field(..., ge=0)
     discount_percent: Decimal = Field(Decimal("0.00"), ge=0, le=100)
     tax_percent: Decimal = Field(Decimal("0.00"), ge=0, le=100)
-    reference_id: Optional[str] = None
+    reference_id: str | None = None
 
 
 class BillCreate(BaseModel):
     patient_id: str
-    encounter_id: Optional[str] = None
+    encounter_id: str | None = None
     bill_type: str
-    items: List[BillItemCreate] = Field(..., min_length=1)
-    notes: Optional[str] = None
+    items: list[BillItemCreate] = Field(..., min_length=1)
+    notes: str | None = None
     discount_amount: Decimal = Field(Decimal("0.00"), ge=0)
 
 
@@ -42,7 +41,7 @@ class BillResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     bill_number: str
-    encounter_id: Optional[str] = None
+    encounter_id: str | None = None
     patient_id: str
     bill_type: str
     subtotal: Decimal
@@ -50,8 +49,8 @@ class BillResponse(BaseModel):
     tax_amount: Decimal
     total_amount: Decimal
     payment_status: str
-    notes: Optional[str] = None
-    items: List[BillItemResponse] = []
+    notes: str | None = None
+    items: list[BillItemResponse] = []
     created_at: datetime
 
 
@@ -59,8 +58,8 @@ class PaymentCreate(BaseModel):
     bill_id: str
     amount: Decimal = Field(..., gt=0)
     payment_method: str
-    transaction_reference: Optional[str] = None
-    notes: Optional[str] = None
+    transaction_reference: str | None = None
+    notes: str | None = None
 
 
 class PaymentResponse(BaseModel):
@@ -69,10 +68,10 @@ class PaymentResponse(BaseModel):
     bill_id: str
     amount: Decimal
     payment_method: str
-    transaction_reference: Optional[str] = None
+    transaction_reference: str | None = None
     payment_date: datetime
     receipt_number: str
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class BillSummary(BaseModel):

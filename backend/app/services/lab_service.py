@@ -1,12 +1,10 @@
 """Laboratory service: orders, sample collection, results, verification."""
 
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.models.laboratory import LabOrder, LabOrderStatus, LabResult, LabTest, ResultFlag
 from app.schemas.laboratory import LabOrderCreate, LabResultCreate
@@ -50,14 +48,14 @@ class LabService:
             )
         order.status = LabOrderStatus.SAMPLE_COLLECTED
         order.sample_id = generate_sample_id()
-        order.collected_at = datetime.now(timezone.utc)
+        order.collected_at = datetime.now(UTC)
         order.collected_by = collector_id
         await db.flush()
         return order
 
     async def enter_results(
         self, db: AsyncSession, data: LabResultCreate, performed_by: str
-    ) -> List[LabResult]:
+    ) -> list[LabResult]:
         order = await self._get_order(db, data.order_id)
         if order.status not in (LabOrderStatus.SAMPLE_COLLECTED, LabOrderStatus.IN_PROGRESS):
             raise HTTPException(
@@ -67,7 +65,7 @@ class LabService:
 
         # Get test reference ranges for abnormal flagging
         test_result = await db.execute(select(LabTest).where(LabTest.id == order.test_id))
-        test = test_result.scalar_one_or_none()
+        test_result.scalar_one_or_none()
 
         results = []
         for param in data.results:
@@ -92,8 +90,8 @@ class LabService:
         return results
 
     async def verify_results(
-        self, db: AsyncSession, order_id: str, verifier_id: str, remarks: str = None
-    ) -> List[LabResult]:
+        self, db: AsyncSession, order_id: str, verifier_id: str, remarks: str | None = None
+    ) -> list[LabResult]:
         order = await self._get_order(db, order_id)
         if order.status != LabOrderStatus.COMPLETED:
             raise HTTPException(
@@ -106,7 +104,7 @@ class LabService:
         )
         lab_results = list(result.scalars().all())
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for lr in lab_results:
             lr.verified_by = verifier_id
             lr.verified_at = now
@@ -128,11 +126,11 @@ class LabService:
         return {"order": order, "results": results}
 
     async def list_orders(
-        self, db: AsyncSession, page: int = 1, page_size: int = 20, status_filter: str = None
+        self, db: AsyncSession, page: int = 1, page_size: int = 20, status_filter: str | None = None
     ) -> dict:
         from sqlalchemy import func as sqlfunc
 
-        query = select(LabOrder).where(LabOrder.is_deleted == False)  # noqa: E712
+        query = select(LabOrder).where(LabOrder.is_deleted == False)
         if status_filter:
             query = query.where(LabOrder.status == status_filter)
         count_q = select(sqlfunc.count()).select_from(query.subquery())
@@ -151,7 +149,7 @@ class LabService:
         return order
 
     @staticmethod
-    def _check_abnormal(value: str, reference_range: str = None) -> tuple:
+    def _check_abnormal(value: str, reference_range: str | None = None) -> tuple:
         """Simple numeric check against reference range 'min-max'."""
         if not reference_range:
             return False, None

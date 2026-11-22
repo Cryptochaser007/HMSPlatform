@@ -1,8 +1,8 @@
 """Billing, Invoicing, and Payment Collection endpoints."""
 
-from typing import Any, Dict, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/billing", tags=["Billing & Payments"])
 )
 async def generate_bill(
     data: BillCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BillResponse:
     """Generate itemized patient invoice (OPD consultation, procedures, bed charges)."""
@@ -55,11 +55,11 @@ async def generate_bill(
     dependencies=[Depends(require_permissions(Permission.BILLING_READ.value))],
 )
 async def list_bills(
-    patient_id: Optional[str] = Query(None),
-    payment_status: Optional[str] = Query(None),
+    patient_id: str | None = Query(None),
+    payment_status: str | None = Query(None),
     pagination: PaginationParams = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Search and paginate billing records."""
     res = await billing_service.list_bills(
         db,
@@ -98,7 +98,7 @@ async def get_bill_details(
 )
 async def record_payment(
     data: PaymentCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PaymentResponse:
     """Record payment received (Cash, Card, UPI, Insurance) and issue money receipt."""

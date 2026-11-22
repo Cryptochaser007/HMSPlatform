@@ -1,13 +1,14 @@
 """Quality & Accreditation models: QualityIndicator, QualityMeasurement, IncidentReport."""
 
 import enum
-from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from app.core.database import Base, TenantOwned
 
 
 class QualityFrequency(str, enum.Enum):
@@ -43,20 +44,21 @@ class IncidentStatus(str, enum.Enum):
     CLOSED = "CLOSED"
 
 
-class QualityIndicator(Base):
+class QualityIndicator(TenantOwned, Base):
     __tablename__ = "quality_indicators"
+    __table_args__ = (UniqueConstraint("hospital_id", "code"),)
 
-    name = Column(String(255), nullable=False)
-    code = Column(String(50), unique=True, nullable=False, index=True)
-    category = Column(String(100), nullable=False)  # Patient Safety, Clinical, Infection Control, etc.
-    description = Column(Text, nullable=False)
-    numerator_description = Column(Text, nullable=False)
-    denominator_description = Column(Text, nullable=False)
-    target_value = Column(Numeric(5, 2), nullable=False)
-    unit = Column(String(20), nullable=False)  # %, count, rate
-    frequency = Column(SAEnum(QualityFrequency, name="quality_frequency_enum"), nullable=False)
-    is_nabh_mandatory = Column(Boolean, default=False, server_default="FALSE")
-    is_active = Column(Boolean, default=True, server_default="TRUE")
+    name: Mapped[Any] = mapped_column(String(255), nullable=False)
+    code: Mapped[Any] = mapped_column(String(50), nullable=False, index=True)
+    category: Mapped[Any] = mapped_column(String(100), nullable=False)  # Patient Safety, Clinical, Infection Control, etc.
+    description: Mapped[Any] = mapped_column(Text, nullable=False)
+    numerator_description: Mapped[Any] = mapped_column(Text, nullable=False)
+    denominator_description: Mapped[Any] = mapped_column(Text, nullable=False)
+    target_value: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
+    unit: Mapped[Any] = mapped_column(String(20), nullable=False)  # %, count, rate
+    frequency: Mapped[Any] = mapped_column(SAEnum(QualityFrequency, name="quality_frequency_enum"), nullable=False)
+    is_nabh_mandatory: Mapped[Any] = mapped_column(Boolean, default=False, server_default="FALSE")
+    is_active: Mapped[Any] = mapped_column(Boolean, default=True, server_default="TRUE")
 
     # Relationships
     measurements = relationship("QualityMeasurement", back_populates="indicator", lazy="dynamic")
@@ -65,17 +67,17 @@ class QualityIndicator(Base):
         return f"<QualityIndicator {self.code} - {self.name}>"
 
 
-class QualityMeasurement(Base):
+class QualityMeasurement(TenantOwned, Base):
     __tablename__ = "quality_measurements"
 
-    indicator_id = Column(UUID(as_uuid=False), ForeignKey("quality_indicators.id"), nullable=False, index=True)
-    period_start = Column(Date, nullable=False)
-    period_end = Column(Date, nullable=False)
-    numerator_value = Column(Numeric(10, 2), nullable=False)
-    denominator_value = Column(Numeric(10, 2), nullable=False)
-    calculated_value = Column(Numeric(10, 2), nullable=False)
-    recorded_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
-    notes = Column(Text, nullable=True)
+    indicator_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("quality_indicators.id"), nullable=False, index=True)
+    period_start: Mapped[Any] = mapped_column(Date, nullable=False)
+    period_end: Mapped[Any] = mapped_column(Date, nullable=False)
+    numerator_value: Mapped[Any] = mapped_column(Numeric(10, 2), nullable=False)
+    denominator_value: Mapped[Any] = mapped_column(Numeric(10, 2), nullable=False)
+    calculated_value: Mapped[Any] = mapped_column(Numeric(10, 2), nullable=False)
+    recorded_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    notes: Mapped[Any] = mapped_column(Text, nullable=True)
 
     # Relationships
     indicator = relationship("QualityIndicator", back_populates="measurements")
@@ -85,27 +87,27 @@ class QualityMeasurement(Base):
         return f"<QualityMeasurement indicator={self.indicator_id} value={self.calculated_value}>"
 
 
-class IncidentReport(Base):
+class IncidentReport(TenantOwned, Base):
     __tablename__ = "incident_reports"
 
-    incident_number = Column(String(50), unique=True, nullable=False, index=True)
-    incident_type = Column(SAEnum(IncidentType, name="incident_type_enum"), nullable=False)
-    severity = Column(SAEnum(IncidentSeverity, name="incident_severity_enum"), nullable=False)
-    title = Column(String(500), nullable=False)
-    description = Column(Text, nullable=False)
-    location = Column(String(255), nullable=False)
-    incident_date = Column(DateTime(timezone=True), nullable=False)
-    reported_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
-    patient_id = Column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=True)
-    root_cause = Column(Text, nullable=True)
-    corrective_action = Column(Text, nullable=True)
-    status = Column(
+    incident_number: Mapped[Any] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    incident_type: Mapped[Any] = mapped_column(SAEnum(IncidentType, name="incident_type_enum"), nullable=False)
+    severity: Mapped[Any] = mapped_column(SAEnum(IncidentSeverity, name="incident_severity_enum"), nullable=False)
+    title: Mapped[Any] = mapped_column(String(500), nullable=False)
+    description: Mapped[Any] = mapped_column(Text, nullable=False)
+    location: Mapped[Any] = mapped_column(String(255), nullable=False)
+    incident_date: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=False)
+    reported_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    patient_id: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("patients.id"), nullable=True)
+    root_cause: Mapped[Any] = mapped_column(Text, nullable=True)
+    corrective_action: Mapped[Any] = mapped_column(Text, nullable=True)
+    status: Mapped[Any] = mapped_column(
         SAEnum(IncidentStatus, name="incident_status_enum"),
         nullable=False,
         default=IncidentStatus.REPORTED,
     )
-    closed_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
-    closed_at = Column(DateTime(timezone=True), nullable=True)
+    closed_by: Mapped[Any] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    closed_at: Mapped[Any] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     reporter = relationship("User", foreign_keys=[reported_by], backref="incidents_reported")

@@ -1,8 +1,8 @@
 """FHIR R4 resource generators conforming to ABDM national health data profiles."""
 
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
 import uuid
+from datetime import UTC, datetime
+from typing import Any
 
 
 def build_patient_resource(
@@ -10,16 +10,16 @@ def build_patient_resource(
     name: str,
     gender: str,
     dob: str,
-    phone: Optional[str] = None,
-    abha_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    phone: str | None = None,
+    abha_id: str | None = None,
+) -> dict[str, Any]:
     """Build FHIR R4 Patient resource under ABDM Patient profile."""
-    resource: Dict[str, Any] = {
+    resource: dict[str, Any] = {
         "resourceType": "Patient",
         "id": patient_id,
         "meta": {
             "versionId": "1",
-            "lastUpdated": datetime.now(timezone.utc).isoformat(),
+            "lastUpdated": datetime.now(UTC).isoformat(),
             "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/Patient"],
         },
         "identifier": [],
@@ -62,8 +62,8 @@ def build_encounter_resource(
     status: str,
     encounter_type: str,
     start_time: str,
-    end_time: Optional[str] = None,
-) -> Dict[str, Any]:
+    end_time: str | None = None,
+) -> dict[str, Any]:
     """Build FHIR R4 Encounter resource."""
     return {
         "resourceType": "Encounter",
@@ -96,7 +96,7 @@ def build_condition_resource(
     encounter_id: str,
     icd_code: str,
     display_name: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build FHIR R4 Condition resource for diagnosis with ICD-10."""
     return {
         "resourceType": "Condition",
@@ -125,7 +125,7 @@ def build_condition_resource(
         },
         "subject": {"reference": f"Patient/{patient_id}"},
         "encounter": {"reference": f"Encounter/{encounter_id}"},
-        "recordedDate": datetime.now(timezone.utc).isoformat(),
+        "recordedDate": datetime.now(UTC).isoformat(),
     }
 
 
@@ -137,7 +137,7 @@ def build_observation_resource(
     display: str,
     value: float,
     unit: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build FHIR R4 Observation resource (e.g. LOINC coded vitals)."""
     return {
         "resourceType": "Observation",
@@ -169,7 +169,7 @@ def build_observation_resource(
         },
         "subject": {"reference": f"Patient/{patient_id}"},
         "encounter": {"reference": f"Encounter/{encounter_id}"},
-        "effectiveDateTime": datetime.now(timezone.utc).isoformat(),
+        "effectiveDateTime": datetime.now(UTC).isoformat(),
         "valueQuantity": {
             "value": value,
             "unit": unit,
@@ -188,7 +188,7 @@ def build_medication_request(
     dosage: str,
     frequency: str,
     duration_days: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build FHIR R4 MedicationRequest resource."""
     return {
         "resourceType": "MedicationRequest",
@@ -203,7 +203,7 @@ def build_medication_request(
         },
         "subject": {"reference": f"Patient/{patient_id}"},
         "encounter": {"reference": f"Encounter/{encounter_id}"},
-        "authoredOn": datetime.now(timezone.utc).isoformat(),
+        "authoredOn": datetime.now(UTC).isoformat(),
         "requester": {"reference": f"Practitioner/{doctor_id}"},
         "dosageInstruction": [
             {
@@ -220,8 +220,8 @@ def build_composition(
     encounter_id: str,
     doctor_id: str,
     title: str,
-    section_entries: List[Dict[str, str]],
-) -> Dict[str, Any]:
+    section_entries: list[dict[str, str]],
+) -> dict[str, Any]:
     """Build FHIR R4 Composition resource organizing clinical document sections."""
     return {
         "resourceType": "Composition",
@@ -242,7 +242,7 @@ def build_composition(
         },
         "subject": {"reference": f"Patient/{patient_id}"},
         "encounter": {"reference": f"Encounter/{encounter_id}"},
-        "date": datetime.now(timezone.utc).isoformat(),
+        "date": datetime.now(UTC).isoformat(),
         "author": [{"reference": f"Practitioner/{doctor_id}"}],
         "title": title,
         "section": [
@@ -255,7 +255,7 @@ def build_composition(
     }
 
 
-def build_bundle(resources: List[Dict[str, Any]], bundle_type: str = "document") -> Dict[str, Any]:
+def build_bundle(resources: list[dict[str, Any]], bundle_type: str = "document") -> dict[str, Any]:
     """Assemble a standard FHIR R4 Bundle containing given resources."""
     bundle_id = str(uuid.uuid4())
     return {
@@ -263,7 +263,7 @@ def build_bundle(resources: List[Dict[str, Any]], bundle_type: str = "document")
         "id": bundle_id,
         "meta": {
             "versionId": "1",
-            "lastUpdated": datetime.now(timezone.utc).isoformat(),
+            "lastUpdated": datetime.now(UTC).isoformat(),
             "profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/DocumentBundle"],
         },
         "identifier": {
@@ -271,7 +271,7 @@ def build_bundle(resources: List[Dict[str, Any]], bundle_type: str = "document")
             "value": bundle_id,
         },
         "type": bundle_type,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "entry": [
             {
                 "fullUrl": f"urn:uuid:{r.get('id', str(uuid.uuid4()))}",
@@ -285,10 +285,10 @@ def build_bundle(resources: List[Dict[str, Any]], bundle_type: str = "document")
 def build_practitioner_resource(
     practitioner_id: str,
     name: str,
-    registration_number: Optional[str] = None,
-) -> Dict[str, Any]:
+    registration_number: str | None = None,
+) -> dict[str, Any]:
     """Build NRCeS FHIR R4 Practitioner resource."""
-    resource: Dict[str, Any] = {
+    resource: dict[str, Any] = {
         "resourceType": "Practitioner",
         "id": practitioner_id,
         "meta": {
@@ -309,8 +309,8 @@ def build_practitioner_resource(
 def build_organization_resource(
     org_id: str,
     name: str,
-    hfr_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    hfr_id: str | None = None,
+) -> dict[str, Any]:
     """Build NRCeS FHIR R4 Organization resource."""
     return {
         "resourceType": "Organization",
@@ -334,9 +334,9 @@ def build_diagnostic_report_resource(
     encounter_id: str,
     title: str,
     conclusion: str,
-    observation_ids: List[str],
-    issued: Optional[str] = None,
-) -> Dict[str, Any]:
+    observation_ids: list[str],
+    issued: str | None = None,
+) -> dict[str, Any]:
     """Build NRCeS FHIR R4 DiagnosticReportLab resource."""
     return {
         "resourceType": "DiagnosticReport",
@@ -359,7 +359,7 @@ def build_diagnostic_report_resource(
         "code": {"text": title},
         "subject": {"reference": f"Patient/{patient_id}"},
         "encounter": {"reference": f"Encounter/{encounter_id}"},
-        "issued": issued or datetime.now(timezone.utc).isoformat(),
+        "issued": issued or datetime.now(UTC).isoformat(),
         "result": [{"reference": f"Observation/{oid}"} for oid in observation_ids],
         "conclusion": conclusion,
     }
@@ -367,21 +367,21 @@ def build_diagnostic_report_resource(
 
 def build_op_consult_bundle(
     *,
-    patient: Dict[str, Any],
-    practitioner: Dict[str, Any],
-    organization: Dict[str, Any],
-    encounter: Dict[str, Any],
-    conditions: Optional[List[Dict[str, Any]]] = None,
-    observations: Optional[List[Dict[str, Any]]] = None,
-    medications: Optional[List[Dict[str, Any]]] = None,
-    chief_complaint: Optional[str] = None,
-) -> Dict[str, Any]:
+    patient: dict[str, Any],
+    practitioner: dict[str, Any],
+    organization: dict[str, Any],
+    encounter: dict[str, Any],
+    conditions: list[dict[str, Any]] | None = None,
+    observations: list[dict[str, Any]] | None = None,
+    medications: list[dict[str, Any]] | None = None,
+    chief_complaint: str | None = None,
+) -> dict[str, Any]:
     """Assemble an NRCeS-compliant FHIR R4 OPConsultRecord Document Bundle."""
     conditions = conditions or []
     observations = observations or []
     medications = medications or []
 
-    sections: List[Dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
     if conditions:
         sections.append(
             {
@@ -450,7 +450,7 @@ def build_op_consult_bundle(
         },
         "subject": {"reference": f"Patient/{patient['id']}"},
         "encounter": {"reference": f"Encounter/{encounter['id']}"},
-        "date": datetime.now(timezone.utc).isoformat(),
+        "date": datetime.now(UTC).isoformat(),
         "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
         "custodian": {"reference": f"Organization/{organization['id']}"},
         "title": "OP Consultation Record",
@@ -472,12 +472,12 @@ def build_op_consult_bundle(
 
 def build_prescription_bundle(
     *,
-    patient: Dict[str, Any],
-    practitioner: Dict[str, Any],
-    organization: Dict[str, Any],
-    encounter: Dict[str, Any],
-    medications: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    patient: dict[str, Any],
+    practitioner: dict[str, Any],
+    organization: dict[str, Any],
+    encounter: dict[str, Any],
+    medications: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Assemble an NRCeS-compliant FHIR R4 PrescriptionRecord Document Bundle."""
     composition = {
         "resourceType": "Composition",
@@ -498,7 +498,7 @@ def build_prescription_bundle(
         },
         "subject": {"reference": f"Patient/{patient['id']}"},
         "encounter": {"reference": f"Encounter/{encounter['id']}"},
-        "date": datetime.now(timezone.utc).isoformat(),
+        "date": datetime.now(UTC).isoformat(),
         "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
         "custodian": {"reference": f"Organization/{organization['id']}"},
         "title": "Prescription Record",
@@ -517,13 +517,13 @@ def build_prescription_bundle(
 
 def build_diagnostic_report_bundle(
     *,
-    patient: Dict[str, Any],
-    practitioner: Dict[str, Any],
-    organization: Dict[str, Any],
-    encounter: Dict[str, Any],
-    report: Dict[str, Any],
-    observations: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    patient: dict[str, Any],
+    practitioner: dict[str, Any],
+    organization: dict[str, Any],
+    encounter: dict[str, Any],
+    report: dict[str, Any],
+    observations: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Assemble an NRCeS-compliant FHIR R4 DiagnosticReportRecord Document Bundle."""
     composition = {
         "resourceType": "Composition",
@@ -544,7 +544,7 @@ def build_diagnostic_report_bundle(
         },
         "subject": {"reference": f"Patient/{patient['id']}"},
         "encounter": {"reference": f"Encounter/{encounter['id']}"},
-        "date": datetime.now(timezone.utc).isoformat(),
+        "date": datetime.now(UTC).isoformat(),
         "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
         "custodian": {"reference": f"Organization/{organization['id']}"},
         "title": "Diagnostic Report",
@@ -563,14 +563,14 @@ def build_diagnostic_report_bundle(
 
 def build_discharge_summary_bundle(
     *,
-    patient: Dict[str, Any],
-    practitioner: Dict[str, Any],
-    organization: Dict[str, Any],
-    encounter: Dict[str, Any],
-    conditions: Optional[List[Dict[str, Any]]] = None,
-    medications: Optional[List[Dict[str, Any]]] = None,
+    patient: dict[str, Any],
+    practitioner: dict[str, Any],
+    organization: dict[str, Any],
+    encounter: dict[str, Any],
+    conditions: list[dict[str, Any]] | None = None,
+    medications: list[dict[str, Any]] | None = None,
     summary_text: str = "Patient discharged in stable condition.",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Assemble an NRCeS-compliant FHIR R4 DischargeSummaryRecord Document Bundle."""
     conditions = conditions or []
     medications = medications or []
@@ -594,7 +594,7 @@ def build_discharge_summary_bundle(
         },
         "subject": {"reference": f"Patient/{patient['id']}"},
         "encounter": {"reference": f"Encounter/{encounter['id']}"},
-        "date": datetime.now(timezone.utc).isoformat(),
+        "date": datetime.now(UTC).isoformat(),
         "author": [{"reference": f"Practitioner/{practitioner['id']}"}],
         "custodian": {"reference": f"Organization/{organization['id']}"},
         "title": "Discharge Summary",
@@ -616,14 +616,14 @@ def build_discharge_summary_bundle(
     )
 
 
-def parse_fhir_bundle_to_timeline(bundle: Dict[str, Any]) -> Dict[str, Any]:
+def parse_fhir_bundle_to_timeline(bundle: dict[str, Any]) -> dict[str, Any]:
     """Extract a structured clinical timeline entry from a decrypted FHIR R4 Document Bundle."""
     entries = bundle.get("entry") or []
     resources = [e.get("resource", {}) for e in entries if isinstance(e, dict)]
 
-    comp = next((r for r in resources if r.get("resourceType") == "Composition"), {})
-    org = next((r for r in resources if r.get("resourceType") == "Organization"), {})
-    prac = next((r for r in resources if r.get("resourceType") == "Practitioner"), {})
+    comp: dict[str, Any] = next((r for r in resources if r.get("resourceType") == "Composition"), {})
+    org: dict[str, Any] = next((r for r in resources if r.get("resourceType") == "Organization"), {})
+    prac: dict[str, Any] = next((r for r in resources if r.get("resourceType") == "Practitioner"), {})
     conditions = [r for r in resources if r.get("resourceType") == "Condition"]
     observations = [r for r in resources if r.get("resourceType") == "Observation"]
     meds = [r for r in resources if r.get("resourceType") == "MedicationRequest"]
@@ -636,7 +636,7 @@ def parse_fhir_bundle_to_timeline(bundle: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "bundle_id": bundle.get("id", str(uuid.uuid4())),
         "document_type": comp.get("title") or comp.get("type", {}).get("text") or "Clinical Document",
-        "date": comp.get("date") or bundle.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "date": comp.get("date") or bundle.get("timestamp") or datetime.now(UTC).isoformat(),
         "facility_name": org.get("name") or "External ABDM Facility",
         "practitioner_name": practitioner_name,
         "diagnoses": [

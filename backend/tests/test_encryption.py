@@ -1,7 +1,9 @@
 """AES-256-GCM envelope format and historical Fernet reader tests."""
-from cryptography.fernet import Fernet
+import base64
+import json
 
 from app.core.encryption import FieldEncryptor
+from cryptography.fernet import Fernet
 
 
 class TestKMS:
@@ -32,3 +34,11 @@ def test_legacy_fernet_value_remains_readable():
     key = Fernet.generate_key().decode()
     legacy = Fernet(key.encode()).encrypt(b"historical-record").decode()
     assert FieldEncryptor(key=key, kms=TestKMS()).decrypt(legacy) == "historical-record"
+
+
+def test_previous_json_envelope_remains_readable():
+    cipher = FieldEncryptor(kms=TestKMS())
+    prefix, key_id, nonce, content = cipher.encrypt("previous-envelope").split(":")
+    wrapped, ciphertext = content.split(".")
+    payload = base64.b64encode(json.dumps({"dek": wrapped, "data": ciphertext}).encode()).decode()
+    assert cipher.decrypt(f"{prefix}:{key_id}:{nonce}:{payload}") == "previous-envelope"

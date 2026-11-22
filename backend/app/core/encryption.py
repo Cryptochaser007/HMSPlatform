@@ -5,10 +5,10 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
-from typing import Optional
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import String, TypeDecorator
 
@@ -19,8 +19,10 @@ settings = get_settings()
 
 class FieldEncryptor:
     """Encrypt fields using random per-value DEKs wrapped by the selected KMS adapter."""
-    def __init__(self, key: Optional[str] = None, kms=None) -> None:
+    def __init__(self, key: str | None = None, kms=None) -> None:
         self._kms = kms
+        self._envelope_writes = kms is not None
+        self._key_secret = key or settings.ENCRYPTION_MASTER_KEY or settings.ENCRYPTION_KEY
         # Keep the historical key dedicated to reading unprefixed Fernet rows.
         self._legacy = self._make_fernet(key or settings.ENCRYPTION_KEY)
 
@@ -29,6 +31,7 @@ class FieldEncryptor:
         try:
             return Fernet(raw.encode())
         except Exception:
+            logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             return Fernet(base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()))
 
     def _adapter(self):
@@ -38,6 +41,11 @@ class FieldEncryptor:
         return self._kms
 
     def encrypt(self, value: str) -> str:
+        if not self._envelope_writes:
+            nonce = os.urandom(12)
+            ciphertext = AESGCM(self._direct_key()).encrypt(nonce, value.encode("utf-8"), b"hms-field:v1")
+            return "v1:{}:{}".format(base64.b64encode(nonce).decode("ascii"),
+                                     base64.b64encode(ciphertext).decode("ascii"))
         dek, wrapped = self._adapter().generate_data_key()
         nonce = os.urandom(12)
         ciphertext = AESGCM(dek).encrypt(nonce, value.encode("utf-8"), b"hms-field:v1")
@@ -53,6 +61,12 @@ class FieldEncryptor:
 
     def decrypt(self, token: str) -> str:
         if token.startswith("v1:"):
+            if token.count(":") == 2:
+                _, nonce, ciphertext = token.split(":")
+                return AESGCM(self._direct_key()).decrypt(
+                    base64.b64decode(nonce, validate=True),
+                    base64.b64decode(ciphertext, validate=True), b"hms-field:v1",
+                ).decode("utf-8")
             version, nonce_b64, payload_b64 = token.split(":", 3)[1:]
             if "." in payload_b64:
                 wrapped_b64, ciphertext_b64 = payload_b64.split(".", 1)
@@ -66,13 +80,15 @@ class FieldEncryptor:
             plain = AESGCM(dek).decrypt(base64.b64decode(nonce_b64, validate=True), base64.b64decode(ciphertext_b64, validate=True), b"hms-field:v1")
             return plain.decode("utf-8")
         # Historical DB values are unprefixed Fernet tokens.
-        try:
-            return self._legacy.decrypt(token.encode()).decode("utf-8")
-        except (InvalidToken, ValueError):
-            raise
+        return self._legacy.decrypt(token.encode()).decode("utf-8")
+
+    def _direct_key(self) -> bytes:
+        if not self._key_secret or self._key_secret.startswith("CHANGE_ME"):
+            raise RuntimeError("Configure the existing encryption secret before encrypting fields")
+        return hashlib.sha256(self._key_secret.encode("utf-8")).digest()
 
 
-_encryptor: Optional[FieldEncryptor] = None
+_encryptor: FieldEncryptor | None = None
 
 def _get_encryptor() -> FieldEncryptor:
     global _encryptor
@@ -93,8 +109,8 @@ class EncryptedType(TypeDecorator):
     impl = String
     cache_ok = True
 
-    def process_bind_param(self, value: Optional[str], dialect) -> Optional[str]:
+    def process_bind_param(self, value: str | None, dialect) -> str | None:
         return None if value is None else encrypt_field(value)
 
-    def process_result_value(self, value: Optional[str], dialect) -> Optional[str]:
+    def process_result_value(self, value: str | None, dialect) -> str | None:
         return None if value is None else decrypt_field(value)

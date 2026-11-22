@@ -1,8 +1,8 @@
 """Electronic Medical Records (EMR): SOAP notes, vitals, prescriptions."""
 
-from typing import Any, Dict, List
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/clinical", tags=["Electronic Medical Records (EMR)"]
 )
 async def create_clinical_note(
     data: ClinicalNoteCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ClinicalNoteResponse:
     """Record clinical consultation note (SOAP, progress note, or procedure)."""
@@ -51,13 +51,13 @@ async def create_clinical_note(
 
 @router.get(
     "/notes/{encounter_id}",
-    response_model=List[ClinicalNoteResponse],
+    response_model=list[ClinicalNoteResponse],
     dependencies=[Depends(require_permissions(Permission.EMR_READ.value))],
 )
 async def get_encounter_notes(
     encounter_id: str,
     db: AsyncSession = Depends(get_db),
-) -> List[ClinicalNoteResponse]:
+) -> list[ClinicalNoteResponse]:
     """Retrieve all clinical notes and history recorded under an encounter."""
     notes = await clinical_service.get_notes_for_encounter(db, encounter_id)
     return [ClinicalNoteResponse.model_validate(n) for n in notes]
@@ -71,7 +71,7 @@ async def get_encounter_notes(
 async def amend_clinical_note(
     note_id: str,
     data: ClinicalNoteUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ClinicalNoteResponse:
     """Create an amendment note linked to original (enforces immutable medical records)."""
@@ -99,7 +99,7 @@ async def amend_clinical_note(
 )
 async def create_prescription(
     data: PrescriptionCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PrescriptionResponse:
     """Create a digital prescription with medication dosages and schedules."""
@@ -121,13 +121,13 @@ async def create_prescription(
 
 @router.get(
     "/prescriptions/{encounter_id}",
-    response_model=List[PrescriptionResponse],
+    response_model=list[PrescriptionResponse],
     dependencies=[Depends(require_permissions(Permission.PRESCRIPTION_READ.value))],
 )
 async def get_encounter_prescriptions(
     encounter_id: str,
     db: AsyncSession = Depends(get_db),
-) -> List[PrescriptionResponse]:
+) -> list[PrescriptionResponse]:
     """Get all prescriptions issued during an encounter."""
     prescriptions = await clinical_service.get_prescriptions_for_encounter(db, encounter_id)
     return [PrescriptionResponse.model_validate(p) for p in prescriptions]
@@ -140,7 +140,7 @@ async def get_encounter_prescriptions(
 )
 async def sign_prescription(
     prescription_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PrescriptionResponse:
     """Doctor digitally signs the prescription to authorize pharmacy dispensing."""
@@ -167,7 +167,7 @@ async def sign_prescription(
 async def get_patient_clinical_timeline(
     patient_id: str,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Retrieve unified historical clinical timeline for the patient."""
     timeline = await clinical_service.get_patient_history(db, patient_id)
     return {

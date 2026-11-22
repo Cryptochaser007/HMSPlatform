@@ -4,9 +4,10 @@ Loads values from environment variables and .env file.
 """
 
 import json
+import logging
 import os
 from functools import lru_cache
-from typing import Any, List, Union
+from typing import Any
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -67,11 +68,11 @@ class Settings(BaseSettings):
     ABDM_CLIENT_SECRET: str = ""
 
     # ── CORS ─────────────────────────────────────────────────────────────
-    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: list[str] | str = ["http://localhost:3000", "http://localhost:8000"]
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v: Any) -> List[str]:
+    def parse_cors_origins(cls, v: Any) -> list[str]:
         """Accept comma-separated string, JSON list, or python list for CORS origins."""
         if isinstance(v, str):
             v = v.strip()
@@ -79,7 +80,7 @@ class Settings(BaseSettings):
                 try:
                     return json.loads(v)
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).exception("Operation failed at an application boundary", exc_info=False)
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         if isinstance(v, (list, tuple, set)):
             return [str(origin).strip() for origin in v if str(origin).strip()]
@@ -89,7 +90,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Return a cached Settings instance (reads .env once)."""
     return Settings()

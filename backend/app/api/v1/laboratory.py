@@ -1,14 +1,13 @@
 """Laboratory Information System (LIS) orders, sampling, and results endpoints."""
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
 from app.core.database import get_db
-from app.core.dependencies import PaginationParams, get_pagination
 from app.core.rbac import Permission
 from app.core.security import get_current_user, require_permissions
 from app.models.laboratory import LabTest
@@ -46,14 +45,14 @@ async def create_lab_test(
 
 @router.get(
     "/tests",
-    response_model=List[LabTestResponse],
+    response_model=list[LabTestResponse],
     dependencies=[Depends(require_permissions(Permission.LAB_ORDER_READ.value))],
 )
 async def list_lab_tests(
     db: AsyncSession = Depends(get_db),
-) -> List[LabTestResponse]:
+) -> list[LabTestResponse]:
     """List all available laboratory test profiles with reference ranges."""
-    res = await db.execute(select(LabTest).where(LabTest.is_deleted == False, LabTest.is_active == True))  # noqa: E712
+    res = await db.execute(select(LabTest).where(LabTest.is_deleted == False, LabTest.is_active == True))
     return [LabTestResponse.model_validate(t) for t in res.scalars().all()]
 
 
@@ -65,7 +64,7 @@ async def list_lab_tests(
 )
 async def order_lab_test(
     data: LabOrderCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LabOrderResponse:
     """Doctor orders laboratory tests for a patient."""
@@ -90,7 +89,7 @@ async def order_lab_test(
 )
 async def collect_sample(
     order_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LabOrderResponse:
     """Phlebotomist logs specimen collection and generates barcoded Sample ID."""
@@ -100,14 +99,14 @@ async def collect_sample(
 
 @router.post(
     "/results",
-    response_model=List[LabResultResponse],
+    response_model=list[LabResultResponse],
     dependencies=[Depends(require_permissions(Permission.LAB_RESULT_CREATE.value))],
 )
 async def enter_lab_results(
     data: LabResultCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> List[LabResultResponse]:
+) -> list[LabResultResponse]:
     """Technician enters specimen assay values, with automatic abnormal range flagging."""
     results = await lab_service.enter_results(db, data, performed_by=current_user["user_id"])
 
@@ -125,15 +124,15 @@ async def enter_lab_results(
 
 @router.put(
     "/orders/{order_id}/verify",
-    response_model=List[LabResultResponse],
+    response_model=list[LabResultResponse],
     dependencies=[Depends(require_permissions(Permission.LAB_RESULT_VERIFY.value))],
 )
 async def verify_lab_results(
     order_id: str,
     body: LabResultVerify,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> List[LabResultResponse]:
+) -> list[LabResultResponse]:
     """Pathologist verifies and signs lab results for reporting."""
     results = await lab_service.verify_results(
         db, order_id, verifier_id=current_user["user_id"], remarks=body.remarks
@@ -148,7 +147,7 @@ async def verify_lab_results(
 async def get_lab_report(
     order_id: str,
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate printable diagnostic laboratory report."""
     data = await lab_service.get_order_with_results(db, order_id)
     return {

@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,19 +11,19 @@ class LabTestCreate(BaseModel):
     code: str
     category: str
     sample_type: str
-    description: Optional[str] = None
-    reference_ranges: Optional[dict] = None
+    description: str | None = None
+    reference_ranges: dict | None = None
     turnaround_hours: int = 24
     price: Decimal = Field(..., ge=0)
 
 
 class LabTestUpdate(BaseModel):
-    name: Optional[str] = None
-    category: Optional[str] = None
-    reference_ranges: Optional[dict] = None
-    turnaround_hours: Optional[int] = None
-    price: Optional[Decimal] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    category: str | None = None
+    reference_ranges: dict | None = None
+    turnaround_hours: int | None = None
+    price: Decimal | None = None
+    is_active: bool | None = None
 
 
 class LabTestResponse(BaseModel):
@@ -34,8 +33,8 @@ class LabTestResponse(BaseModel):
     code: str
     category: str
     sample_type: str
-    description: Optional[str] = None
-    reference_ranges: Optional[dict] = None
+    description: str | None = None
+    reference_ranges: dict | None = None
     turnaround_hours: int
     price: Decimal
     is_active: bool
@@ -46,7 +45,7 @@ class LabOrderCreate(BaseModel):
     patient_id: str
     test_id: str
     priority: str = Field("ROUTINE", pattern="^(ROUTINE|URGENT|STAT)$")
-    clinical_notes: Optional[str] = None
+    clinical_notes: str | None = None
 
 
 class LabOrderResponse(BaseModel):
@@ -58,26 +57,26 @@ class LabOrderResponse(BaseModel):
     test_id: str
     status: str
     priority: str
-    clinical_notes: Optional[str] = None
-    sample_id: Optional[str] = None
-    collected_at: Optional[datetime] = None
+    clinical_notes: str | None = None
+    sample_id: str | None = None
+    collected_at: datetime | None = None
     created_at: datetime
 
 
 class LabResultParam(BaseModel):
     parameter_name: str
     value: str
-    unit: Optional[str] = None
-    reference_range: Optional[str] = None
+    unit: str | None = None
+    reference_range: str | None = None
 
 
 class LabResultCreate(BaseModel):
     order_id: str
-    results: List[LabResultParam] = Field(..., min_length=1)
+    results: list[LabResultParam] = Field(..., min_length=1)
 
 
 class LabResultVerify(BaseModel):
-    remarks: Optional[str] = None
+    remarks: str | None = None
 
 
 class LabResultResponse(BaseModel):
@@ -86,11 +85,11 @@ class LabResultResponse(BaseModel):
     order_id: str
     parameter_name: str
     value: str
-    unit: Optional[str] = None
-    reference_range: Optional[str] = None
+    unit: str | None = None
+    reference_range: str | None = None
     is_abnormal: bool
-    flag: Optional[str] = None
-    verified_by: Optional[str] = None
-    verified_at: Optional[datetime] = None
-    remarks: Optional[str] = None
+    flag: str | None = None
+    verified_by: str | None = None
+    verified_at: datetime | None = None
+    remarks: str | None = None
 

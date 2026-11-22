@@ -1,8 +1,7 @@
 """Billing service: invoice generation, itemized charges, payment processing."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -77,7 +76,7 @@ class BillingService:
         result = await db.execute(
             select(Bill)
             .options(selectinload(Bill.items), selectinload(Bill.payments))
-            .where(Bill.id == bill_id, Bill.is_deleted == False)  # noqa: E712
+            .where(Bill.id == bill_id, Bill.is_deleted == False)
         )
         bill = result.scalar_one_or_none()
         if bill is None:
@@ -89,10 +88,10 @@ class BillingService:
         db: AsyncSession,
         page: int = 1,
         page_size: int = 20,
-        patient_id: Optional[str] = None,
-        payment_status: Optional[str] = None,
+        patient_id: str | None = None,
+        payment_status: str | None = None,
     ) -> dict:
-        query = select(Bill).options(selectinload(Bill.items)).where(Bill.is_deleted == False)  # noqa: E712
+        query = select(Bill).options(selectinload(Bill.items)).where(Bill.is_deleted == False)
         if patient_id:
             query = query.where(Bill.patient_id == patient_id)
         if payment_status:
@@ -120,7 +119,7 @@ class BillingService:
             amount=data.amount,
             payment_method=data.payment_method,
             transaction_reference=data.transaction_reference,
-            payment_date=datetime.now(timezone.utc),
+            payment_date=datetime.now(UTC),
             received_by=received_by,
             receipt_number=rcp_no,
             notes=data.notes,
@@ -150,7 +149,7 @@ class BillingService:
         return bill
 
     async def get_billing_summary(self, db: AsyncSession, period: str = "today") -> dict:
-        query = select(Bill).where(Bill.is_deleted == False)  # noqa: E712
+        query = select(Bill).where(Bill.is_deleted == False)
         bills = list((await db.execute(query)).scalars().all())
 
         total_bills = len(bills)

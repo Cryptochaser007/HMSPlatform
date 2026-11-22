@@ -1,20 +1,19 @@
 """Patient Registration & Demographics endpoints with DPDP compliance."""
 
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditAction, get_audit_logger
 from app.core.database import get_db
 from app.core.dependencies import PaginationParams, get_pagination
-from app.core.rbac import Permission, Role
+from app.core.rbac import Permission
 from app.core.security import get_current_user, require_permissions
 from app.core.wasa_security import mask_identifier, mask_pii_dict
 from app.models.consent import Consent, ConsentStatus, ConsentType
-from app.models.patient import Patient
 from app.schemas.consent import ConsentCreate, ConsentResponse
 from app.schemas.patient import (
     PatientCreate,
@@ -36,7 +35,7 @@ router = APIRouter(prefix="/patients", tags=["Patient Registration & Demographic
 )
 async def register_patient(
     data: PatientCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PatientResponse:
     """Register a new patient with auto-generated UHID, encryption for PII, and ABHA ID."""
@@ -64,7 +63,7 @@ async def register_patient(
     dependencies=[Depends(require_permissions(Permission.PATIENT_READ.value))],
 )
 async def list_patients(
-    query: Optional[str] = Query(None, description="Search name, phone, or UHID"),
+    query: str | None = Query(None, description="Search name, phone, or UHID"),
     pagination: PaginationParams = Depends(get_pagination),
     db: AsyncSession = Depends(get_db),
 ) -> PatientListResponse:
@@ -103,7 +102,7 @@ async def get_patient_by_id(
 async def update_patient(
     patient_id: str,
     data: PatientUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PatientResponse:
     """Update patient demographic details with audit capture."""
@@ -127,9 +126,9 @@ async def update_patient(
 )
 async def delete_patient_dpdp(
     patient_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Execute DPDP Act Right-to-Erasure (anonymization and soft delete)."""
     await patient_service.soft_delete_patient(db, patient_id)
 
@@ -156,7 +155,7 @@ async def delete_patient_dpdp(
 async def record_patient_consent(
     patient_id: str,
     data: ConsentCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ConsentResponse:
     """Record signed consent artifact for patient data processing / ABDM linking."""
@@ -167,7 +166,7 @@ async def record_patient_consent(
         data_categories=data.data_categories or ["demographics", "clinical"],
         granted_to=data.granted_to,
         status=ConsentStatus.GRANTED,
-        granted_at=datetime.now(timezone.utc),
+        granted_at=datetime.now(UTC),
         expires_at=data.expires_at,
     )
     db.add(consent)
@@ -188,13 +187,13 @@ async def record_patient_consent(
 
 @router.get(
     "/{patient_id}/consents",
-    response_model=List[ConsentResponse],
+    response_model=list[ConsentResponse],
     dependencies=[Depends(require_permissions(Permission.CONSENT_READ.value))],
 )
 async def list_patient_consents(
     patient_id: str,
     db: AsyncSession = Depends(get_db),
-) -> List[ConsentResponse]:
+) -> list[ConsentResponse]:
     """List historical consents recorded for the patient."""
     res = await db.execute(select(Consent).where(Consent.patient_id == patient_id))
     consents = list(res.scalars().all())
