@@ -27,9 +27,11 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: ENCRYPTION_KEY
-        generateValue: true
+        sync: false
+        # Copy the existing legacy Fernet key from the current backend.
       - key: ENCRYPTION_MASTER_KEY
-        generateValue: true
+        sync: false
+        # Copy the existing AES-GCM master secret. Preserve historical versioned keys too.
       - key: ENCRYPTION_KEY_VERSION
         value: "1"
       - key: SUPABASE_URL

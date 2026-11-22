@@ -1,7 +1,8 @@
 """User model for authentication, RBAC, and staff management."""
 
 from sqlalchemy import Boolean, Column, DateTime, Enum, String
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
+from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.database import Base
 from app.core.encryption import EncryptedType
@@ -21,6 +22,7 @@ class User(Base):
     is_active: bool = Column(Boolean, default=True, server_default="TRUE", nullable=False)
     is_verified: bool = Column(Boolean, default=False, server_default="FALSE", nullable=False)
     last_login = Column(DateTime(timezone=True), nullable=True)
+    hospital_id = deferred(Column(UUID(as_uuid=False), nullable=True))
 
     # Relationships
     encounters_as_doctor = relationship("Encounter", back_populates="doctor", foreign_keys="Encounter.doctor_id")

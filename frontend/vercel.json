@@ -5,8 +5,8 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/v1/:path*",
-      "destination": "https://hms-backend.onrender.com/api/v1/:path*"
+      "source": "/api/:path*",
+      "destination": "https://hms-backend.onrender.com/api/:path*"
     },
     {
       "source": "/health",

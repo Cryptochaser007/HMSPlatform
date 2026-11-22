@@ -1,7 +1,5 @@
 """Tenant (Hospital) onboarding and multi-tenancy management endpoints."""
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
@@ -86,7 +84,7 @@ async def register_tenant(
     admin_user = User(
         email=str(data.admin_email).lower(),
         hashed_password=hash_password(data.admin_password),
-        name=data.admin_name,
+        full_name=data.admin_name,
         role=Role.HOSPITAL_ADMIN.value,
         is_active=True,
         hospital_id=hospital.id,
@@ -95,13 +93,10 @@ async def register_tenant(
     await db.flush()
 
     # Set PostgreSQL RLS context for the new tenant
-    try:
-        await db.execute(
-            text("SELECT set_config('app.hospital_id', :hid, true)"),
-            {"hid": str(hospital.id)},
-        )
-    except Exception:
-        pass
+    await db.execute(
+        text("SELECT set_config('app.hospital_id', :hid, true)"),
+        {"hid": str(hospital.id)},
+    )
 
     # Audit log
     logger = await get_audit_logger()
@@ -131,7 +126,13 @@ async def list_tenants(
     current_user: dict = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
     """List registered hospital facilities."""
-    result = await db.execute(select(Hospital).where(Hospital.is_active == True).limit(50))
+    query = select(Hospital).where(Hospital.is_active.is_(True), Hospital.is_deleted.is_(False))
+    if current_user["role"] != Role.SUPER_ADMIN.value:
+        hospital_id = current_user.get("hospital_id")
+        if not hospital_id:
+            raise HTTPException(status_code=403, detail="Hospital membership required")
+        query = query.where(Hospital.id == hospital_id)
+    result = await db.execute(query.limit(50))
     hospitals = result.scalars().all()
     return [
         {

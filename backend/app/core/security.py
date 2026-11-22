@@ -259,6 +259,7 @@ async def get_current_user(
     # Read additive migration fields without selecting them in the ORM model,
     # so pre-003 databases continue to authenticate during rolling deployment.
     columns = (await db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name IN ('hospital_id','tokens_valid_after')"))).scalars().all()
+    hospital_id = None
     if "hospital_id" in columns:
         hospital_id = (await db.execute(text("SELECT hospital_id FROM users WHERE id=:uid"), {"uid": user_id})).scalar_one_or_none()
         if hospital_id:
@@ -275,6 +276,7 @@ async def get_current_user(
         "permissions": payload.get("permissions", []),
         "jti": jti,
         "db_user": user,
+        "hospital_id": str(hospital_id) if hospital_id else None,
     }
 
 

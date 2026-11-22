@@ -1,0 +1,14 @@
+-- Apply after both 003 migrations, before deploying Stage 2 onboarding.
+BEGIN;
+ALTER TABLE hospitals
+  ADD COLUMN IF NOT EXISTS hfr_id VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS state VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS city VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS hospital_id UUID REFERENCES hospitals(id);
+CREATE INDEX IF NOT EXISTS idx_users_hospital_id ON users(hospital_id);
+COMMIT;
