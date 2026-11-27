@@ -11,6 +11,7 @@ import { DoctorEMR } from './pages/DoctorEMR';
 import { AbhaPortal } from './pages/AbhaPortal';
 import { RBACMatrix } from './pages/RBACMatrix';
 import { WardOccupancy } from './pages/WardOccupancy';
+import { WardSetup, WardSetupOnboarding } from './pages/WardSetup';
 import { ModulePortal } from './pages/ModulePortal';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -53,12 +54,13 @@ export const App: React.FC = () => {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Dashboard />} />
+            <Route index element={<WardSetupOnboarding><Dashboard /></WardSetupOnboarding>} />
             <Route path="abha" element={<AbhaRoute />} />
             <Route path="patients" element={<Patients />} />
             <Route path="queue" element={<Queue />} />
             <Route path="emr" element={<DoctorEMR />} />
             <Route path="wards" element={<WardOccupancy />} />
+            <Route path="wards/setup" element={<WardSetup />} />
             <Route path="rbac" element={<RBACMatrix />} />
             <Route path="patient-portal" element={<ModulePortal title="Patient Portal" description="Patient appointments, records, consent and care updates." />} />
             <Route path="admin" element={<ModulePortal title="Administration" description="Hospital configuration, staff access and registry management." />} />

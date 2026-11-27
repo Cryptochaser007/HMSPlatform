@@ -3,6 +3,7 @@
 Set STAGE1_OWNER_URL to an isolated test database owner URL. DATABASE_URL must
 point at the same database using a NOSUPERUSER NOBYPASSRLS runtime account.
 """
+import asyncio
 import base64
 import os
 from pathlib import Path
@@ -134,6 +135,145 @@ async def signup(client, prefix):
     assert response.status_code == 200, response.text
     client.headers["X-CSRF-Token"] = client.cookies.get("csrf_token")
     return response, payload
+
+
+@DATABASE_TEST
+@pytest.mark.asyncio
+async def test_ward_setup_skip_and_inventory_are_tenant_scoped():
+    transport = ASGITransport(app=app)
+    setup = "/api/v1/wards/setup"
+    occupancy = "/api/v1/wards/occupancy"
+    async with (
+        AsyncClient(transport=transport, base_url="https://test") as hospital,
+        AsyncClient(transport=transport, base_url="https://test") as clinic,
+        AsyncClient(transport=transport, base_url="https://test") as fresh_session,
+        AsyncClient(transport=transport, base_url="https://test") as doctor,
+    ):
+        assert (await fresh_session.get(setup)).status_code == 401
+        await signup(hospital, "bed-setup-hospital")
+        _, clinic_credentials = await signup(clinic, "bed-setup-clinic")
+        assert (await hospital.get(setup)).json() == {"status": "pending"}
+        assert (await clinic.get(setup)).json() == {"status": "pending"}
+
+        skipped = await clinic.post(setup, json={"mode": "OPD_ONLY"})
+        assert skipped.status_code == 200, skipped.text
+        assert skipped.json() == {"status": "skipped"}
+        login = await fresh_session.post("/api/v1/auth/login", json={
+            "email": clinic_credentials["admin_email"], "password": clinic_credentials["admin_password"],
+        })
+        assert login.status_code == 200, login.text
+        fresh_session.headers["X-CSRF-Token"] = fresh_session.cookies.get("csrf_token") or ""
+        assert (await fresh_session.get(setup)).json() == {"status": "skipped"}
+        assert (await hospital.get(setup)).json() == {"status": "pending"}
+
+        wards = [
+            {"name": "General East", "ward_type": "GENERAL", "floor": 1, "total_beds": 14},
+            {"name": "ICU East", "ward_type": "ICU", "floor": 2, "total_beds": 4},
+            {"name": "NICU East", "ward_type": "NICU", "floor": 2, "total_beds": 2},
+        ]
+        payload = {"mode": "INPATIENT", "wards": wards}
+        invalid = await hospital.post(setup, json={**payload, "wards": [wards[0], wards[0]]})
+        assert invalid.status_code == 422
+        assert (await hospital.get(occupancy)).json()["total_beds"] == 0
+        foreign = await hospital.post(setup, json={**payload, "hospital_id": str(uuid4())})
+        assert foreign.status_code == 422
+
+        first, retry = await asyncio.gather(
+            hospital.post(setup, json=payload), hospital.post(setup, json=payload),
+        )
+        for response in (first, retry):
+            assert response.status_code == 200, response.text
+            assert response.json() == {"status": "configured"}
+        assert (await hospital.get(setup)).json() == {"status": "configured"}
+        saved = (await hospital.get(occupancy)).json()
+        assert saved["total_beds"] == saved["available"] == 20
+        assert {row["ward_type"]: len(row["beds"]) for row in saved["wards"]} == {
+            "GENERAL": 14, "ICU": 4, "NICU": 2,
+        }
+        clinic_inventory = await fresh_session.get(occupancy)
+        assert clinic_inventory.status_code == 200, clinic_inventory.text
+        assert clinic_inventory.json()["total_beds"] == 0
+        assert (await hospital.post(setup, json={"mode": "OPD_ONLY"})).status_code == 409
+        assert (await hospital.post(setup, json={**payload, "wards": wards[:1]})).status_code == 409
+
+        resumed = await fresh_session.post(setup, json={**payload, "wards": wards[2:]})
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json() == {"status": "configured"}
+        assert (await fresh_session.get(setup)).json() == {"status": "configured"}
+        assert (await fresh_session.get(occupancy)).json()["total_beds"] == 2
+
+        email = f"ward-doctor-{uuid4().hex}@example.com"
+        credentials = {"email": email, "password": "Stage1StrongPassword!"}
+        created = await hospital.post("/api/v1/auth/signup", json={
+            **credentials, "full_name": "Ward Test Doctor", "role": "DOCTOR",
+        })
+        assert created.status_code == 201, created.text
+        doctor_login = await doctor.post("/api/v1/auth/login", json=credentials)
+        assert doctor_login.status_code == 200, doctor_login.text
+        doctor.headers["X-CSRF-Token"] = doctor.cookies.get("csrf_token") or ""
+        assert (await doctor.get(setup)).status_code == 403
+        assert (await doctor.post(setup, json=payload)).status_code == 403
+
+
+@DATABASE_TEST
+@pytest.mark.asyncio
+async def test_bed_inventory_is_empty_then_tenant_scoped():
+    transport = ASGITransport(app=app)
+    occupancy_url = "/api/v1/wards/occupancy"
+    async with AsyncClient(transport=transport, base_url="https://test") as first, AsyncClient(
+        transport=transport, base_url="https://test"
+    ) as second:
+        await signup(first, "ward-a")
+        await signup(second, "ward-b")
+
+        async def get_inventory(client):
+            response = await client.get(occupancy_url)
+            assert response.status_code == 200, response.text
+            return response.json()
+
+        async def create_ward(client, name, ward_type, count):
+            response = await client.post("/api/v1/wards/", json={
+                "name": name, "ward_type": ward_type, "floor": 1, "total_beds": count,
+            })
+            assert response.status_code == 201, response.text
+            return response.json()["id"]
+
+        blank = await get_inventory(first)
+        assert blank == {
+            "total_beds": 0, "occupied": 0, "available": 0, "maintenance": 0, "reserved": 0,
+            "occupancy_rate": 0.0, "by_ward_type": [], "wards": [],
+        }
+
+        first_icu = await create_ward(first, "ICU East", "ICU", 2)
+        first_nicu = await create_ward(first, "NICU East", "NICU", 1)
+        assert await get_inventory(second) == blank
+        second_general = await create_ward(second, "General West", "GENERAL", 4)
+
+        first_inventory = await get_inventory(first)
+        assert first_inventory["total_beds"] == first_inventory["available"] == 3
+        wards = {ward["id"]: ward for ward in first_inventory["wards"]}
+        assert wards.keys() == {first_icu, first_nicu}
+        assert wards[first_nicu]["ward_type"] == "NICU"
+        icu_beds = wards[first_icu]["beds"]
+        assert [bed["bed_number"] for bed in icu_beds] == ["ICU-101", "ICU-102"]
+        bed_id = icu_beds[0]["id"]
+        assert set(icu_beds[0]) == {"id", "bed_number", "status"}
+        bed_status_url = f"/api/v1/wards/beds/{bed_id}/status"
+        blocked = await second.put(bed_status_url, json={"status": "MAINTENANCE"})
+        assert blocked.status_code == 404, blocked.text
+        changed = await first.put(bed_status_url, json={"status": "MAINTENANCE"})
+        assert changed.status_code == 200, changed.text
+        updated = await get_inventory(first)
+        assert (updated["total_beds"], updated["available"], updated["maintenance"]) == (3, 2, 1)
+        assert updated["wards"][0]["beds"][0] == {
+            "id": bed_id, "bed_number": "ICU-101", "status": "MAINTENANCE",
+        }
+        assert updated["by_ward_type"][0]["available"] == 1
+
+        second_inventory = await get_inventory(second)
+        assert second_inventory["total_beds"] == second_inventory["available"] == 4
+        assert [ward["id"] for ward in second_inventory["wards"]] == [second_general]
+        assert bed_id not in {bed["id"] for bed in second_inventory["wards"][0]["beds"]}
 
 
 @pytest.mark.asyncio

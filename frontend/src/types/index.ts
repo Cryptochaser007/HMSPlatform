@@ -153,17 +153,44 @@ export interface LabResultItem {
   category: string;
 }
 
+export type WardType =
+  | 'GENERAL' | 'SEMI_PRIVATE' | 'PRIVATE' | 'ICU'
+  | 'NICU' | 'PICU' | 'ISOLATION' | 'EMERGENCY';
+
+export const wardLabels: Record<WardType, string> = {
+  GENERAL: 'General',
+  SEMI_PRIVATE: 'Semi-private',
+  PRIVATE: 'Private',
+  ICU: 'ICU',
+  NICU: 'NICU',
+  PICU: 'PICU',
+  ISOLATION: 'Isolation',
+  EMERGENCY: 'Emergency',
+};
+
+export interface WardSetupWard {
+  name: string;
+  ward_type: WardType;
+  floor: number;
+  total_beds: number;
+}
+
+export interface WardSetupStatus {
+  status: 'pending' | 'skipped' | 'configured';
+}
+
 export interface BedItem {
   id: string;
-  ward_name: string;
-  ward_type: 'ICU' | 'GENERAL' | 'DELUXE' | 'EMERGENCY';
   bed_number: string;
   status: 'AVAILABLE' | 'OCCUPIED' | 'MAINTENANCE' | 'RESERVED';
-  daily_charge: number;
-  patient_name?: string;
-  patient_uhid?: string;
-  attending_doctor?: string;
-  admitted_at?: string;
+}
+
+export interface WardInventory {
+  id: string;
+  name: string;
+  ward_type: WardType;
+  floor: number;
+  beds: BedItem[];
 }
 
 export interface WardOccupancyStats {
@@ -173,6 +200,7 @@ export interface WardOccupancyStats {
   maintenance: number;
   reserved: number;
   occupancy_rate: number;
+  wards: WardInventory[];
 }
 
 export interface AbdmStatus {

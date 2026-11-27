@@ -1,19 +1,73 @@
 """Ward, Bed and IPD Admission service."""
 
+from collections import Counter
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.encounter import Encounter, EncounterStatus
+from app.models.tenant import Hospital
 from app.models.ward import Admission, AdmissionStatus, Bed, BedStatus, DischargeType, Ward
-from app.schemas.ward import AdmissionCreate, DischargeCreate, WardCreate
+from app.schemas.ward import (
+    AdmissionCreate,
+    DischargeCreate,
+    WardCreate,
+    WardSetupRequest,
+    WardSetupStatus,
+)
 
 
 class WardService:
     """Business logic for ward bed allocation, IPD admissions, and discharges."""
+
+    async def lock_hospital(self, db: AsyncSession, hospital_id: str) -> Hospital:
+        result = await db.execute(
+            select(Hospital).where(Hospital.id == hospital_id)
+            .with_for_update().execution_options(populate_existing=True)
+        )
+        return result.scalar_one()
+
+    async def get_setup_status(self, db: AsyncSession, hospital_id: str) -> WardSetupStatus:
+        configured = await db.scalar(select(exists().where(
+            Ward.hospital_id == hospital_id, Ward.is_active.is_(True), Ward.is_deleted.is_(False),
+        )))
+        if configured:
+            return WardSetupStatus(status="configured")
+        skipped = await db.scalar(select(Hospital.ward_setup_skipped).where(Hospital.id == hospital_id))
+        return WardSetupStatus(status="skipped" if skipped else "pending")
+
+    async def save_setup(
+        self, db: AsyncSession, hospital_id: str, data: WardSetupRequest,
+    ) -> tuple[WardSetupStatus, bool]:
+        hospital = await self.lock_hospital(db, hospital_id)
+        existing = (await db.scalars(select(Ward).where(
+            Ward.hospital_id == hospital_id, Ward.is_active.is_(True), Ward.is_deleted.is_(False),
+        ))).all()
+        if existing:
+            existing_layout = {
+                (ward.name.casefold(), ward.ward_type, ward.floor, ward.total_beds, ward.department)
+                for ward in existing
+            }
+            requested_layout = {
+                (ward.name.casefold(), ward.ward_type, ward.floor, ward.total_beds, ward.department)
+                for ward in data.wards
+            }
+            if len(existing) == len(data.wards) and existing_layout == requested_layout:
+                return WardSetupStatus(status="configured"), False
+            raise HTTPException(status_code=409, detail="Wards are already configured for this hospital.")
+
+        if data.mode == "OPD_ONLY":
+            changed = not hospital.ward_setup_skipped
+            hospital.ward_setup_skipped = True
+            return WardSetupStatus(status="skipped"), changed
+
+        for ward in data.wards:
+            await self.create_ward(db, ward)
+        hospital.ward_setup_skipped = False
+        return WardSetupStatus(status="configured"), True
 
     async def create_ward(self, db: AsyncSession, data: WardCreate) -> Ward:
         ward = Ward(
@@ -142,48 +196,48 @@ class WardService:
         await db.flush()
         return admission
 
-    async def get_bed_occupancy(self, db: AsyncSession) -> dict:
-        total_beds_res = await db.execute(select(func.count(Bed.id)))
-        total_beds = total_beds_res.scalar() or 0
-
-        occupied_res = await db.execute(select(func.count(Bed.id)).where(Bed.status == BedStatus.OCCUPIED))
-        occupied = occupied_res.scalar() or 0
-
-        available_res = await db.execute(select(func.count(Bed.id)).where(Bed.status == BedStatus.AVAILABLE))
-        available = available_res.scalar() or 0
-
-        maintenance_res = await db.execute(select(func.count(Bed.id)).where(Bed.status == BedStatus.MAINTENANCE))
-        maintenance = maintenance_res.scalar() or 0
-
-        reserved_res = await db.execute(select(func.count(Bed.id)).where(Bed.status == BedStatus.RESERVED))
-        reserved = reserved_res.scalar() or 0
-
-        rate = (occupied / total_beds * 100.0) if total_beds > 0 else 0.0
-
-        # By ward
-        wards_res = await db.execute(select(Ward).options(selectinload(Ward.beds)))
-        wards = wards_res.scalars().all()
-
+    async def get_bed_occupancy(self, db: AsyncSession, hospital_id: str) -> dict:
+        result = await db.execute(
+            select(Ward)
+            .where(Ward.hospital_id == hospital_id, Ward.is_active.is_(True), Ward.is_deleted.is_(False))
+            .options(
+                selectinload(Ward.beds.and_(Bed.hospital_id == hospital_id, Bed.is_deleted.is_(False)))
+            )
+            .order_by(Ward.floor, Ward.name, Ward.id)
+        )
+        totals: Counter[BedStatus] = Counter()
         by_ward_type = []
-        for w in wards:
-            w_total = len(w.beds)
-            w_occ = sum(1 for b in w.beds if b.status == BedStatus.OCCUPIED)
+        inventory = []
+        for ward in result.scalars():
+            beds = sorted(ward.beds, key=lambda bed: (bed.bed_number, bed.id))
+            counts = Counter(bed.status for bed in beds)
+            totals.update(counts)
             by_ward_type.append({
-                "ward_name": w.name,
-                "ward_type": w.ward_type.value if hasattr(w.ward_type, "value") else str(w.ward_type),
-                "total": w_total,
-                "occupied": w_occ,
-                "available": w_total - w_occ,
+                "ward_name": ward.name,
+                "ward_type": ward.ward_type,
+                "total": len(beds),
+                "occupied": counts[BedStatus.OCCUPIED],
+                "available": counts[BedStatus.AVAILABLE],
+            })
+            inventory.append({
+                "id": ward.id,
+                "name": ward.name,
+                "ward_type": ward.ward_type,
+                "floor": ward.floor,
+                "beds": beds,
             })
 
+        total_beds = totals.total()
+        occupied = totals[BedStatus.OCCUPIED]
         return {
             "total_beds": total_beds,
             "occupied": occupied,
-            "available": available,
-            "maintenance": maintenance,
-            "reserved": reserved,
-            "occupancy_rate": round(rate, 2),
+            "available": totals[BedStatus.AVAILABLE],
+            "maintenance": totals[BedStatus.MAINTENANCE],
+            "reserved": totals[BedStatus.RESERVED],
+            "occupancy_rate": round(occupied / total_beds * 100, 2) if total_beds else 0.0,
             "by_ward_type": by_ward_type,
+            "wards": inventory,
         }
 
 

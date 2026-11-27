@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditAction, get_audit_logger
 from app.core.database import get_db
 from app.core.rbac import Permission
-from app.core.security import get_current_user, require_permissions
+from app.core.security import get_current_user, require_permissions, require_roles
 from app.schemas.ward import (
     AdmissionCreate,
     AdmissionResponse,
@@ -18,10 +18,13 @@ from app.schemas.ward import (
     DischargeCreate,
     WardCreate,
     WardResponse,
+    WardSetupRequest,
+    WardSetupStatus,
 )
 from app.services.ward_service import ward_service
 
 router = APIRouter(prefix="/wards", tags=["Ward & Bed Management"])
+require_hospital_admin = require_roles("HOSPITAL_ADMIN")
 
 
 @router.post(
@@ -32,11 +35,37 @@ router = APIRouter(prefix="/wards", tags=["Ward & Bed Management"])
 )
 async def create_ward(
     data: WardCreate,
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> WardResponse:
     """Create a new hospital ward (ICU, General, Private) and initialize beds."""
+    await ward_service.lock_hospital(db, current_user["hospital_id"])
     ward = await ward_service.create_ward(db, data)
     return WardResponse.model_validate(ward)
+
+
+@router.get("/setup", response_model=WardSetupStatus)
+async def get_ward_setup(
+    current_user: dict[str, Any] = Depends(require_hospital_admin),
+    db: AsyncSession = Depends(get_db),
+) -> WardSetupStatus:
+    return await ward_service.get_setup_status(db, current_user["hospital_id"])
+
+
+@router.post("/setup", response_model=WardSetupStatus)
+async def save_ward_setup(
+    data: WardSetupRequest,
+    current_user: dict[str, Any] = Depends(require_hospital_admin),
+    db: AsyncSession = Depends(get_db),
+) -> WardSetupStatus:
+    hospital_id = current_user["hospital_id"]
+    result, changed = await ward_service.save_setup(db, hospital_id, data)
+    if changed:
+        await (await get_audit_logger()).log(
+            db, user_id=current_user["user_id"], action=AuditAction.UPDATE,
+            entity_type="Hospital", entity_id=hospital_id, new_value={"ward_setup": result.status},
+        )
+    return result
 
 
 @router.get(
@@ -131,9 +160,10 @@ async def discharge_patient(
     dependencies=[Depends(require_permissions(Permission.ADMISSION_READ.value))],
 )
 async def get_bed_occupancy_dashboard(
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BedOccupancyDashboard:
     """Live hospital bed census and occupancy rates by ward."""
-    dashboard = await ward_service.get_bed_occupancy(db)
+    dashboard = await ward_service.get_bed_occupancy(db, current_user["hospital_id"])
     return BedOccupancyDashboard(**dashboard)
 

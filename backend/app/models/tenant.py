@@ -20,6 +20,7 @@ class Hospital(Base):
     abdm_env: Mapped[Any] = mapped_column(String(20), nullable=False, default="MOCK")
     subscription_tier: Mapped[Any] = mapped_column(String(30), nullable=False, default="TRIAL")
     is_active: Mapped[Any] = mapped_column(Boolean, nullable=False, default=True)
+    ward_setup_skipped: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class Department(Base):

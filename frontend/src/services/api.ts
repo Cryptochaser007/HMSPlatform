@@ -8,6 +8,8 @@ import {
   AbhaProfile,
   SignupData,
   WardOccupancyStats,
+  WardSetupStatus,
+  WardSetupWard,
   AbdmStatus,
   AbdmShareProfile,
   AbdmConsentArtefact,
@@ -276,8 +278,16 @@ export const abdmApi = {
 };
 
 export const wardsApi = {
-  getOccupancy: async (): Promise<WardOccupancyStats> => {
-    const res = await api.get('/wards/occupancy');
+  getSetup: async (signal?: AbortSignal): Promise<WardSetupStatus> => {
+    const res = await api.get<WardSetupStatus>('/wards/setup', { signal });
+    return res.data;
+  },
+  saveSetup: async (mode: 'INPATIENT' | 'OPD_ONLY', wards: WardSetupWard[]): Promise<WardSetupStatus> => {
+    const res = await api.post<WardSetupStatus>('/wards/setup', { mode, wards });
+    return res.data;
+  },
+  getOccupancy: async (signal?: AbortSignal): Promise<WardOccupancyStats> => {
+    const res = await api.get<WardOccupancyStats>('/wards/occupancy', { signal });
     return res.data;
   },
   listWards: async (): Promise<any[]> => {
