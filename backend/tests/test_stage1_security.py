@@ -136,9 +136,35 @@ async def signup(client, prefix):
     return response, payload
 
 
+@pytest.mark.asyncio
+async def test_abdm_routes_fail_closed_when_disabled(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "ABDM_ENABLED", False)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:
+        status = await client.get("/api/v1/abdm/status")
+        assert status.status_code == 200
+        assert status.json()["integration_enabled"] is False
+        for method, path in [
+            ("POST", "/api/v1/abdm/abha/aadhaar/otp"),
+            ("POST", "/api/v1/abdm/abha/link-patient"),
+            ("POST", "/api/v1/abdm/hiu/health-info/fetch"),
+            ("GET", "/api/v1/abdm/hiu/records/pilot@example"),
+            ("POST", "/api/v1/registry/hfr/sync"),
+            ("POST", "/api/v3/hip/patient/care-context/discover"),
+            ("POST", "/api/v1/abdm/v3/hip/patient/care-context/discover"),
+        ]:
+            response = await client.request(method, path)
+            assert response.status_code == 403, (path, response.text)
+            assert response.json()["detail"] == "ABHA integration is unavailable in this environment."
+
+
 @DATABASE_TEST
 @pytest.mark.asyncio
 async def test_signup_isolation_idle_lockout_and_audit(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "ABDM_ENABLED", False)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="https://test") as first, AsyncClient(
         transport=transport, base_url="https://test"
@@ -150,9 +176,11 @@ async def test_signup_isolation_idle_lockout_and_audit(monkeypatch):
         assert profile.status_code == 200, profile.text
         patient = {"first_name": "Private", "last_name": "Patient", "date_of_birth": "1990-01-01",
                    "gender": "MALE", "phone": "9876543210"}
+        assert (await first.post("/api/v1/patients/", json={**patient, "abha_id": "12345678901234"})).status_code == 403
         created = await first.post("/api/v1/patients/", json=patient)
         assert created.status_code == 201, created.text
         patient_id = created.json()["id"]
+        assert (await first.put(f"/api/v1/patients/{patient_id}", json={"abha_address": "test@abdm"})).status_code == 403
         assert (await second.get(f"/api/v1/patients/{patient_id}")).status_code == 404
         assert (await second.put(f"/api/v1/patients/{patient_id}", json={"city": "Other"})).status_code == 404
         listing = await second.get("/api/v1/patients/")
@@ -213,6 +241,59 @@ async def test_signup_isolation_idle_lockout_and_audit(monkeypatch):
         from unittest.mock import AsyncMock
         monkeypatch.setattr("app.core.security._get_redis", AsyncMock(return_value=None))
         assert (await second.get("/api/v1/auth/me")).status_code == 503
+
+
+@DATABASE_TEST
+@pytest.mark.asyncio
+async def test_opd_assigns_only_active_doctors_from_the_hospital():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="https://test") as first, AsyncClient(
+        transport=transport, base_url="https://test"
+    ) as second:
+        _, admin = await signup(first, "opd-first")
+        await signup(second, "opd-second")
+        directory = "/api/v1/encounters/assignable-doctors"
+        assert (await first.get(directory)).json() == []
+
+        async def create_doctor(client, name):
+            response = await client.post("/api/v1/auth/signup", json={
+                "email": f"doctor-{uuid4().hex}@example.com",
+                "password": "Stage1StrongPassword!",
+                "full_name": name,
+                "role": "DOCTOR",
+            })
+            assert response.status_code == 201, response.text
+            return response.json()["id"]
+
+        doctor = await create_doctor(first, "OPD Doctor")
+        other = await create_doctor(second, "Other Hospital Doctor")
+        inactive = await create_doctor(first, "Inactive Doctor")
+        owner = await asyncpg.connect(OWNER_URL)
+        try:
+            await owner.execute("UPDATE public.users SET is_active=false WHERE id=$1::uuid", inactive)
+        finally:
+            await owner.close()
+        listed = await first.get(directory)
+        assert listed.status_code == 200
+        assert listed.json() == [{"id": doctor, "full_name": "OPD Doctor"}]
+
+        patient = await first.post("/api/v1/patients/", json={
+            "first_name": "Synthetic", "last_name": "Patient", "date_of_birth": "1990-01-01",
+            "gender": "MALE", "phone": "9876543210",
+        })
+        assert patient.status_code == 201
+        encounter = {
+            "patient_id": patient.json()["id"], "department": "OPD", "encounter_type": "OPD",
+        }
+        admin_profile = await first.get("/api/v1/auth/me")
+        assert admin_profile.json()["email"] == admin["admin_email"]
+        for rejected in (other, inactive, admin_profile.json()["id"]):
+            denied = await first.post("/api/v1/encounters/", json={**encounter, "doctor_id": rejected})
+            assert denied.status_code == 404
+        created = await first.post("/api/v1/encounters/", json={**encounter, "doctor_id": doctor})
+        assert created.status_code == 201, created.text
+        assert created.json()["doctor_id"] == doctor
+        assert created.json()["token_number"] == 1
 
 
 @DATABASE_TEST

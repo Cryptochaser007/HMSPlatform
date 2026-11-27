@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ABHA_UNAVAILABLE, useAbdmEnabled } from '../context/AbdmAvailability';
 import { patientsApi } from '../services/api';
 import { Patient } from '../types';
 import {
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 
 export const Patients: React.FC = () => {
+  const abdmEnabled = useAbdmEnabled();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -60,7 +62,8 @@ export const Patients: React.FC = () => {
     setError(null);
 
     try {
-      const created = await patientsApi.create(formData);
+      const { abha_id, ...demographics } = formData;
+      const created = await patientsApi.create(abdmEnabled && abha_id ? { ...demographics, abha_id } : demographics);
       setNewlyCreatedUHID(created.registration_number);
       setIsModalOpen(false);
       // Reset form
@@ -96,7 +99,7 @@ export const Patients: React.FC = () => {
             <Users className="w-6 h-6 text-brand-600" /> Patient Registry
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Auto-generating unique UHIDs with AES-256 field encryption & ABDM ABHA linkage.
+            Register patients and issue hospital UHIDs.
           </p>
         </div>
         <button
@@ -194,13 +197,13 @@ export const Patients: React.FC = () => {
                       {p.phone}
                     </td>
                     <td className="py-3 px-4 text-xs">
-                      {p.abha_id ? (
+                      {abdmEnabled && p.abha_id ? (
                         <span className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
                           <ShieldCheck className="w-3 h-3 text-emerald-600" />
                           {p.abha_id}
                         </span>
                       ) : (
-                        <span className="text-slate-400 text-xs italic">Not linked</span>
+                        <span className="text-slate-400 text-xs italic">{abdmEnabled ? 'Not linked' : 'Unavailable'}</span>
                       )}
                     </td>
                     <td className="py-3 px-4 text-xs font-semibold text-slate-700">
@@ -358,7 +361,8 @@ export const Patients: React.FC = () => {
                   type="text"
                   value={formData.abha_id}
                   onChange={(e) => setFormData({ ...formData, abha_id: e.target.value })}
-                  placeholder="e.g. 91-1234-5678-9012 or user@abdm"
+                  disabled={!abdmEnabled}
+                  placeholder={abdmEnabled ? 'Enter ABHA number' : ABHA_UNAVAILABLE}
                   className="w-full text-sm border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-brand-500 focus:outline-none font-mono"
                 />
               </div>

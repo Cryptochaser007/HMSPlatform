@@ -19,6 +19,7 @@ from uuid import uuid4
 
 import pytest
 from app.abdm.abha_service import abha_service
+from app.core.config import get_settings
 from app.core.security import get_current_user
 from app.main import app
 from fastapi.testclient import TestClient
@@ -27,8 +28,9 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def scoped_client():
+def scoped_client(monkeypatch):
     global client
+    monkeypatch.setattr(get_settings(), "ABDM_ENABLED", True)
     with TestClient(app) as scoped:
         client = scoped
         yield

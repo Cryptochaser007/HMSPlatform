@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { encountersApi, patientsApi } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { authApi, encountersApi, patientsApi } from '../services/api';
 import { Encounter, Patient } from '../types';
 import {
   Clock,
@@ -12,8 +13,13 @@ import {
 } from 'lucide-react';
 
 export const Queue: React.FC = () => {
+  const { user } = useAuth();
   const [encounters, setEncounters] = useState<Encounter[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [doctors, setDoctors] = useState<{ id: string; full_name: string }[]>([]);
+  const [loadingDoctors, setLoadingDoctors] = useState(false);
+  const [addingDoctor, setAddingDoctor] = useState(false);
+  const [doctorMessage, setDoctorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -23,10 +29,10 @@ export const Queue: React.FC = () => {
   // Form State
   const [formData, setFormData] = useState({
     patient_id: '',
-    doctor_id: '22222222-2222-2222-2222-222222222221', // Default to Dr. Rajesh Sharma
-    department: 'General Medicine',
+    doctor_id: '',
+    department: 'OPD',
     encounter_type: 'OPD',
-    chief_complaint: 'Fever and body aches for 3 days',
+    chief_complaint: '',
     priority: 'NORMAL',
   });
 
@@ -54,10 +60,52 @@ export const Queue: React.FC = () => {
     fetchData();
   }, []);
 
+  const openTokenForm = async () => {
+    setIsModalOpen(true);
+    setError(null);
+    setLoadingDoctors(true);
+    setDoctors([]);
+    setFormData(prev => ({ ...prev, doctor_id: '', chief_complaint: '' }));
+    try {
+      setDoctors(await encountersApi.listAssignableDoctors());
+    } catch {
+      setError('Could not load doctors for this hospital. Close this form and try again.');
+    } finally {
+      setLoadingDoctors(false);
+    }
+  };
+
+  const handleAddDoctor = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    setAddingDoctor(true);
+    setDoctorMessage(null);
+    try {
+      await authApi.signup({
+        role: 'DOCTOR',
+        full_name: String(fields.get('name') ?? '').trim(),
+        email: String(fields.get('email') ?? '').trim(),
+        password: String(fields.get('password') ?? ''),
+      });
+      form.reset();
+      setDoctorMessage('Doctor account created. You can now assign this doctor an OPD token.');
+    } catch {
+      setDoctorMessage('Could not create the doctor account. Check the details and try again.');
+    } finally {
+      (form.elements.namedItem('password') as HTMLInputElement).value = '';
+      setAddingDoctor(false);
+    }
+  };
+
   const handleCreateEncounter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.patient_id) {
       setError('Please select or register a patient first.');
+      return;
+    }
+    if (!doctors.some(doctor => doctor.id === formData.doctor_id)) {
+      setError('Select an active doctor from this hospital.');
       return;
     }
     setSubmitting(true);
@@ -110,16 +158,34 @@ export const Queue: React.FC = () => {
           </p>
         </div>
         <button
-          onClick={() => {
-            setIsModalOpen(true);
-            setError(null);
-          }}
+          onClick={openTokenForm}
           className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 shadow-sm"
         >
           <PlusCircle className="w-4 h-4" />
           Issue OPD Token
         </button>
       </div>
+
+      {user?.role === 'HOSPITAL_ADMIN' && (
+        <details className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer text-sm font-semibold">Add a doctor to this hospital</summary>
+          <form onSubmit={handleAddDoctor} className="mt-3 flex flex-wrap items-end gap-3 text-sm">
+            <label>Full name
+              <input name="name" required minLength={2} maxLength={255} className="block rounded border p-2" />
+            </label>
+            <label>Email
+              <input name="email" type="email" required maxLength={255} className="block rounded border p-2" />
+            </label>
+            <label>Initial password
+              <input name="password" type="password" autoComplete="new-password" required minLength={8} maxLength={72} className="block rounded border p-2" />
+            </label>
+            <button type="submit" disabled={addingDoctor} className="rounded bg-slate-800 px-4 py-2 text-white disabled:opacity-50">
+              {addingDoctor ? 'Creating…' : 'Create doctor account'}
+            </button>
+          </form>
+          {doctorMessage && <p role="status" className="mt-2 text-sm">{doctorMessage}</p>}
+        </details>
+      )}
 
       {/* Queue Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -256,6 +322,7 @@ export const Queue: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, department: e.target.value })}
                     className="w-full text-sm border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   >
+                    <option value="OPD">OPD</option>
                     <option value="General Medicine">General Medicine</option>
                     <option value="Cardiology">Cardiology</option>
                     <option value="Orthopedics">Orthopedics</option>
@@ -270,12 +337,16 @@ export const Queue: React.FC = () => {
                   <select
                     value={formData.doctor_id}
                     onChange={(e) => setFormData({ ...formData, doctor_id: e.target.value })}
+                    required
+                    disabled={loadingDoctors || doctors.length === 0}
                     className="w-full text-sm border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   >
-                    <option value="22222222-2222-2222-2222-222222222221">Dr. Rajesh Sharma</option>
-                    <option value="22222222-2222-2222-2222-222222222222">Dr. Priya Patel</option>
-                    <option value="22222222-2222-2222-2222-222222222223">Dr. Amit Verma</option>
+                    <option value="">{loadingDoctors ? 'Loading doctors…' : 'Choose a doctor'}</option>
+                    {doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.full_name}</option>)}
                   </select>
+                  {!loadingDoctors && doctors.length === 0 && (
+                    <p className="mt-1 text-xs text-slate-600">Ask a hospital administrator to add an active doctor.</p>
+                  )}
                 </div>
               </div>
 
@@ -317,7 +388,7 @@ export const Queue: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || patients.length === 0}
+                  disabled={submitting || loadingDoctors || !formData.doctor_id || patients.length === 0}
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 disabled:opacity-50"
                 >
                   {submitting ? 'Generating Token...' : 'Issue OPD Token'}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useAbdmEnabled } from '../../context/AbdmAvailability';
 import { UserRole } from '../../types';
 import {
   Search,
@@ -33,6 +34,7 @@ export const CommandPalette: React.FC<{ isOpen: boolean; onClose: () => void }> 
 }) => {
   const navigate = useNavigate();
   const { switchRoleDemo } = useAuth();
+  const abdmEnabled = useAbdmEnabled();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -195,6 +197,7 @@ export const CommandPalette: React.FC<{ isOpen: boolean; onClose: () => void }> 
   ];
 
   const filtered = commands.filter((c) => {
+    if (!abdmEnabled && c.id === 'act-create-abha') return false;
     const q = query.toLowerCase().trim();
     if (!q) return true;
     return (

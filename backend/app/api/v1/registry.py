@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.abdm.availability import require_abdm_enabled
 from app.abdm.hfr_service import hfr_service
 from app.abdm.hpr_service import hpr_service
 from app.core.database import get_db
@@ -63,7 +64,7 @@ def _base(row) -> dict[str, Any]:
     return {"id": str(row.id), "created_at": row.created_at.isoformat(), "updated_at": row.updated_at.isoformat()}
 
 
-@router.post("/registry/hfr/sync", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_permissions(Permission.ADMIN_PANEL.value))])
+@router.post("/registry/hfr/sync", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_abdm_enabled), Depends(require_permissions(Permission.ADMIN_PANEL.value))])
 async def sync_hfr_facility(facility_id: str = Query(..., min_length=2, max_length=100), db: AsyncSession = Depends(get_db)):
     profile = await hfr_service.get_facility_profile(facility_id)
     row = (await db.execute(select(HFRFacility).where(HFRFacility.hfr_id == facility_id))).scalar_one_or_none()
@@ -80,7 +81,7 @@ async def sync_hfr_facility(facility_id: str = Query(..., min_length=2, max_leng
     return {**_base(row), "hfr_id": row.hfr_id, "facility_name": row.facility_name, "registry_status": row.registry_status, "synced_at": row.synced_at.isoformat()}
 
 
-@router.post("/registry/hpr/sync", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_permissions(Permission.USER_MANAGE.value))])
+@router.post("/registry/hpr/sync", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_abdm_enabled), Depends(require_permissions(Permission.USER_MANAGE.value))])
 async def sync_hpr_practitioner(registration_number: str = Query(..., min_length=2, max_length=100), council: str = Query(..., min_length=2, max_length=150), db: AsyncSession = Depends(get_db)):
     profile = await hpr_service.verify_doctor(registration_number, council)
     row = (await db.execute(select(HPRPractitioner).where(HPRPractitioner.hpr_id == profile.hpr_id))).scalar_one_or_none()

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.abdm.availability import require_abdm_enabled
 from app.core.audit import AuditAction, get_audit_logger
 from app.core.database import get_db
 from app.core.dependencies import PaginationParams, get_pagination
@@ -39,6 +40,11 @@ async def register_patient(
     db: AsyncSession = Depends(get_db),
 ) -> PatientResponse:
     """Register a new patient with auto-generated UHID, encryption for PII, and ABHA ID."""
+    if data.abha_id or data.abha_address:
+        require_abdm_enabled()
+    data = data.model_copy(update={
+        "abha_id": data.abha_id or None, "abha_address": data.abha_address or None,
+    })
     patient = await patient_service.register_patient(db, data)
 
     # Immutable audit logging
@@ -106,6 +112,8 @@ async def update_patient(
     db: AsyncSession = Depends(get_db),
 ) -> PatientResponse:
     """Update patient demographic details with audit capture."""
+    if data.model_fields_set.intersection({"abha_id", "abha_address"}):
+        require_abdm_enabled()
     patient = await patient_service.update_patient(db, patient_id, data)
 
     logger = await get_audit_logger()

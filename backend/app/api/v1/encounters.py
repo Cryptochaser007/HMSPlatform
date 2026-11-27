@@ -13,6 +13,7 @@ from app.core.rbac import Permission
 from app.core.security import get_current_user, require_permissions
 from app.schemas.encounter import (
     AppointmentSlot,
+    AssignableDoctor,
     EncounterCreate,
     EncounterListResponse,
     EncounterResponse,
@@ -36,7 +37,7 @@ async def create_encounter(
     db: AsyncSession = Depends(get_db),
 ) -> EncounterResponse:
     """Create a new encounter (OPD walk-in, IPD intake, or booked appointment)."""
-    encounter = await encounter_service.create_encounter(db, data)
+    encounter = await encounter_service.create_encounter(db, data, current_user["hospital_id"])
 
     logger = await get_audit_logger()
     await logger.log(
@@ -81,6 +82,18 @@ async def list_encounters(
         page=res["page"],
         page_size=res["page_size"],
     )
+
+
+@router.get(
+    "/assignable-doctors",
+    response_model=list[AssignableDoctor],
+    dependencies=[Depends(require_permissions(Permission.ENCOUNTER_CREATE.value))],
+)
+async def list_assignable_doctors(
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, str]]:
+    return await encounter_service.list_assignable_doctors(db, current_user["hospital_id"])
 
 
 @router.get(

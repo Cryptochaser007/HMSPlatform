@@ -16,6 +16,7 @@ from app.abdm.client import ABDMError
 from app.abdm.config import get_abdm_settings
 from app.abdm.hiu_service import ConsentRequest, hiu_service
 from app.abdm.hpr_service import hpr_service
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.dependencies import RateLimiter
 from app.core.rbac import Permission
@@ -100,7 +101,7 @@ class AbhaAddressEnrollRequest(BaseModel):
 @public_router.get("/abdm/status")
 async def get_abdm_status() -> dict[str, Any]:
     """Return active ABDM adapter mode (MOCK | SANDBOX | PRODUCTION) and safe gateway metadata."""
-    return get_abdm_settings().public_status()
+    return {**get_abdm_settings().public_status(), "integration_enabled": get_settings().ABDM_ENABLED}
 
 
 # =============================================================================

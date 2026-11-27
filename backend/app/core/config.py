@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     CLOUD_PROVIDER: str = "SUPABASE_FREE"
 
     # ── ABDM Integration ─────────────────────────────────────────────────
+    ABDM_ENABLED: bool = False
     ABDM_BASE_URL: str = "https://dev.abdm.gov.in/gateway"
     ABDM_CLIENT_ID: str = ""
     ABDM_CLIENT_SECRET: str = ""

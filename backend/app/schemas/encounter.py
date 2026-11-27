@@ -1,13 +1,14 @@
 """Pydantic v2 schemas for Encounters (OPD/IPD workflow)."""
 
 from datetime import date, datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class EncounterCreate(BaseModel):
     patient_id: str
-    doctor_id: str
+    doctor_id: UUID
     encounter_type: str = Field(..., pattern="^(OPD|IPD|EMERGENCY)$")
     department: str
     appointment_time: datetime | None = None
@@ -21,6 +22,11 @@ class EncounterUpdate(BaseModel):
     room_number: str | None = None
     follow_up_date: date | None = None
     chief_complaint: str | None = None
+
+
+class AssignableDoctor(BaseModel):
+    id: str
+    full_name: str
 
 
 class EncounterResponse(BaseModel):

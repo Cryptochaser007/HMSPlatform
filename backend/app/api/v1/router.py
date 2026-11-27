@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
+from app.abdm.availability import require_abdm_enabled
 from app.abdm.callbacks import router as abdm_callbacks_router
 from app.abdm.callbacks import verify_gateway_callback_request
 from app.api.v1.abdm import public_router as abdm_public_router
@@ -55,8 +56,11 @@ api_router.include_router(ward_router)
 api_router.include_router(quality_router)
 
 # ABDM Ecosystem Endpoints
-api_router.include_router(abdm_router)
+api_router.include_router(abdm_router, dependencies=[Depends(require_abdm_enabled)])
 
 # ABDM Webhook Callbacks
-api_router.include_router(abdm_callbacks_router, prefix="/abdm", dependencies=[Depends(verify_gateway_callback_request)])
+api_router.include_router(
+    abdm_callbacks_router, prefix="/abdm",
+    dependencies=[Depends(require_abdm_enabled), Depends(verify_gateway_callback_request)],
+)
 

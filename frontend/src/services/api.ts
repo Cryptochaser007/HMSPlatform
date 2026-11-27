@@ -113,6 +113,10 @@ export const patientsApi = {
 };
 
 export const encountersApi = {
+  listAssignableDoctors: async (): Promise<{ id: string; full_name: string }[]> => {
+    const res = await api.get('/encounters/assignable-doctors');
+    return res.data;
+  },
   list: async (params?: { doctor_id?: string; status_filter?: string }): Promise<{ items: Encounter[]; total: number }> => {
     const res = await api.get('/encounters/', { params: { ...params, page_size: 50 } });
     return res.data;

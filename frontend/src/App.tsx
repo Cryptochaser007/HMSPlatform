@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ABHA_UNAVAILABLE, AbdmAvailabilityProvider, useAbdmEnabled } from './context/AbdmAvailability';
 import { Layout } from './components/layout/Layout';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
@@ -28,8 +29,15 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
     return <Navigate to="/login" replace />;
   }
 
-  return <>{children}</>;
+  return <AbdmAvailabilityProvider>{children}</AbdmAvailabilityProvider>;
 };
+
+const AbhaRoute = () => useAbdmEnabled() ? <AbhaPortal /> : (
+  <section className="rounded-lg border border-slate-200 bg-white p-5">
+    <h2 className="font-semibold text-slate-900">ABHA integration</h2>
+    <p className="mt-2 text-sm text-slate-600">{ABHA_UNAVAILABLE} Use the hospital UHID for patient care.</p>
+  </section>
+);
 
 export const App: React.FC = () => {
   return (
@@ -46,7 +54,7 @@ export const App: React.FC = () => {
             }
           >
             <Route index element={<Dashboard />} />
-            <Route path="abha" element={<AbhaPortal />} />
+            <Route path="abha" element={<AbhaRoute />} />
             <Route path="patients" element={<Patients />} />
             <Route path="queue" element={<Queue />} />
             <Route path="emr" element={<DoctorEMR />} />

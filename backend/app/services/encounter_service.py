@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.rbac import Role
 from app.models.encounter import Encounter, EncounterStatus, EncounterType
 from app.models.user import User
 from app.schemas.encounter import EncounterCreate, EncounterUpdate
@@ -14,7 +15,27 @@ from app.schemas.encounter import EncounterCreate, EncounterUpdate
 class EncounterService:
     """Business logic for OPD/IPD encounters, queue, and appointments."""
 
-    async def create_encounter(self, db: AsyncSession, data: EncounterCreate) -> Encounter:
+    @staticmethod
+    def _assignable_doctors(hospital_id: str):
+        return select(User.id, User.full_name).where(
+            User.hospital_id == hospital_id,
+            User.role == Role.DOCTOR,
+            User.is_active.is_(True),
+            User.is_deleted.is_(False),
+        )
+
+    async def list_assignable_doctors(self, db: AsyncSession, hospital_id: str) -> list[dict[str, str]]:
+        result = await db.execute(self._assignable_doctors(hospital_id).order_by(User.full_name, User.id))
+        return [{"id": doctor_id, "full_name": name} for doctor_id, name in result.all()]
+
+    async def create_encounter(
+        self, db: AsyncSession, data: EncounterCreate, hospital_id: str,
+    ) -> Encounter:
+        doctor_id = str(data.doctor_id)
+        result = await db.execute(self._assignable_doctors(hospital_id).where(User.id == doctor_id))
+        if result.one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignable doctor not found")
+
         # Assign token number for OPD walk-ins
         token_number = None
         if data.encounter_type == "OPD":
@@ -26,7 +47,7 @@ class EncounterService:
 
         encounter = Encounter(
             patient_id=data.patient_id,
-            doctor_id=data.doctor_id,
+            doctor_id=doctor_id,
             encounter_type=data.encounter_type,
             status=initial_status,
             token_number=token_number,

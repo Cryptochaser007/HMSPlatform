@@ -176,6 +176,7 @@ export interface WardOccupancyStats {
 }
 
 export interface AbdmStatus {
+  integration_enabled: boolean;
   abdm_env: 'MOCK' | 'SANDBOX' | 'PRODUCTION';
   gateway_url: string;
   abha_url: string;

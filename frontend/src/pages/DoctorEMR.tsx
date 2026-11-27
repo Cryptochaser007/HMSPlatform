@@ -4,6 +4,7 @@ import { encountersApi, clinicalApi } from '../services/api';
 import { Encounter, Vitals, PrescriptionItem, LabResultItem } from '../types';
 import { DigitalRxModal } from '../components/common/DigitalRxModal';
 import { HIULongitudinalPanel } from '../components/emr/HIULongitudinalPanel';
+import { ABHA_UNAVAILABLE, useAbdmEnabled } from '../context/AbdmAvailability';
 import {
   Stethoscope,
   Activity,
@@ -295,6 +296,7 @@ const SAMPLE_LAB_RESULTS: LabResultItem[] = [
 ];
 
 export const DoctorEMR: React.FC = () => {
+  const abdmEnabled = useAbdmEnabled();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const encounterIdFromUrl = searchParams.get('encounter_id');
@@ -602,6 +604,8 @@ export const DoctorEMR: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('hiu')}
+          disabled={!abdmEnabled}
+          title={abdmEnabled ? undefined : ABHA_UNAVAILABLE}
           className={`pb-3 px-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition-colors ${
             activeTab === 'hiu'
               ? 'border-brand-600 text-brand-700'
@@ -609,7 +613,7 @@ export const DoctorEMR: React.FC = () => {
           }`}
         >
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          ABDM Longitudinal Record (M3 HIU)
+          {abdmEnabled ? 'ABDM Longitudinal Record (M3 HIU)' : 'ABHA records unavailable'}
         </button>
       </div>
 
@@ -1024,7 +1028,7 @@ export const DoctorEMR: React.FC = () => {
       )}
 
       {/* TAB 3: M3 ABDM HIU LONGITUDINAL HEALTH RECORD */}
-      {activeTab === 'hiu' && (
+      {abdmEnabled && activeTab === 'hiu' && (
         <HIULongitudinalPanel
           defaultPatientAbha={
             activeEncounter?.patient?.abha_id
