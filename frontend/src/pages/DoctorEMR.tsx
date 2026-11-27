@@ -5,6 +5,7 @@ import { Encounter, Vitals, PrescriptionItem, LabResultItem } from '../types';
 import { DigitalRxModal } from '../components/common/DigitalRxModal';
 import { HIULongitudinalPanel } from '../components/emr/HIULongitudinalPanel';
 import { ABHA_UNAVAILABLE, useAbdmEnabled } from '../context/AbdmAvailability';
+import { useAuth } from '../context/AuthContext';
 import {
   Stethoscope,
   Activity,
@@ -15,7 +16,6 @@ import {
   Plus,
   Trash2,
   ArrowLeft,
-  Share2,
   Microscope,
   Sparkles,
   ArrowUpRight,
@@ -309,6 +309,7 @@ export const DoctorEMR: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [rxModalOpen, setRxModalOpen] = useState(false);
+  const { user } = useAuth();
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   // Vitals State
@@ -487,6 +488,7 @@ export const DoctorEMR: React.FC = () => {
               onChange={(e) => {
                 setSelectedEncounterId(e.target.value);
                 setSuccess(false);
+                setRxModalOpen(false);
               }}
               className="text-sm font-semibold bg-white border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-brand-500 focus:outline-none"
             >
@@ -502,9 +504,10 @@ export const DoctorEMR: React.FC = () => {
 
           <button
             onClick={() => setRxModalOpen(true)}
-            className="py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm ml-2"
+            disabled={!activeEncounter}
+            className="py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm ml-2 disabled:opacity-50"
           >
-            <Share2 className="w-3.5 h-3.5 text-emerald-400" /> Dispatch Rx
+            <Printer className="w-3.5 h-3.5" /> Preview Prescription
           </button>
         </div>
       </div>
@@ -517,7 +520,7 @@ export const DoctorEMR: React.FC = () => {
             <div>
               <div className="text-sm font-bold">Consultation Successfully Finalized & Electronically Signed!</div>
               <div className="text-xs text-emerald-700">
-                The SOAP clinical note, vitals, and prescription have been committed to the immutable medical audit trail.
+                The SOAP clinical note and vitals were saved.
               </div>
             </div>
           </div>
@@ -525,7 +528,7 @@ export const DoctorEMR: React.FC = () => {
             onClick={() => setRxModalOpen(true)}
             className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs"
           >
-            <Share2 className="w-3.5 h-3.5" /> Share Digital Rx with Patient
+            <Printer className="w-3.5 h-3.5" /> Preview Prescription
           </button>
         </div>
       )}
@@ -899,9 +902,10 @@ export const DoctorEMR: React.FC = () => {
             <div className="flex gap-3">
               <button
                 onClick={() => setRxModalOpen(true)}
-                className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5"
+                disabled={!activeEncounter}
+                className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 disabled:opacity-50"
               >
-                <Share2 className="w-3.5 h-3.5 text-brand-600" /> Share Digital Rx
+                <Printer className="w-3.5 h-3.5 text-brand-600" /> Preview Prescription
               </button>
               <button
                 onClick={handleSaveConsultation}
@@ -1038,15 +1042,17 @@ export const DoctorEMR: React.FC = () => {
         />
       )}
 
-      {/* Digital Prescription & Dispatch Modal */}
-      <DigitalRxModal
-        isOpen={rxModalOpen}
-        onClose={() => setRxModalOpen(false)}
-        patient={activeEncounter?.patient}
-        diagnosis={soap.assessment}
-        vitals={vitals}
-        prescriptions={prescriptions}
-      />
+      {rxModalOpen && activeEncounter && (
+        <DigitalRxModal
+          key={activeEncounter.id}
+          onClose={() => setRxModalOpen(false)}
+          patientId={activeEncounter.patient_id}
+          doctorName={user?.full_name}
+          department={activeEncounter.department}
+          diagnosis={soap.assessment}
+          prescriptions={prescriptions}
+        />
+      )}
     </div>
   );
 };
